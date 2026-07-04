@@ -327,6 +327,10 @@ Public Class frmInterface
 
     End Sub
 
+    ''' <summary>
+    ''' Sube al hosting el bloque de tablas GetQuery_TablasAlmacen, GetQuery_TablasEnlace, GetQuery_TablasEstudios, GetQuery_TablasMedicas
+    ''' </summary>
+    ''' <remarks></remarks>
     Private Sub ExportarDataToHostingSP()
 
         Try

@@ -140,7 +140,7 @@ Public Class frmInterface
 
             tb_ClienteData = tb_Recordset_MySQL_Admin("SELECT * FROM ssf_clientes WHERE clues = '" & clues & "'")
             If tb_ClienteData.Rows.Count = 0 Then
-                AgregarLog(500, ".Error de Conexión con el Servidor. ")
+                AgregarLog(500, ".Error de Conexiï¿½n con el Servidor. ")
                 Return False
             End If
 
@@ -240,10 +240,7 @@ Public Class frmInterface
             ' Rutinas Importar 
             '======================================
 
-            '- - Actualizar Scrupts de la Base de Datos. - - - 
-            Me.ActualizarDB()
-
-            '- - Importar Cirugía agendada en el portal. - - - 
+            '- - Importar Cirugï¿½a agendada en el portal. - - - 
             Try
                 Me.ImportarCirugiaTemporal()
             Catch ex As Exception
@@ -256,6 +253,13 @@ Public Class frmInterface
                 Me.notificarAlertaProductoCantidadFueraPaquete()
             Catch ex As Exception
                 LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
+            End Try
+
+            '- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - - 
+            Try
+                ImportarFirmasRecibido()
+            Catch ex As Exception
+                LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
             End Try
 
 
@@ -541,9 +545,54 @@ Public Class frmInterface
                             columnCache(table_name) = tb_campos
                         End If
 
+                        'Diccionario con las columnas excluidas por tabla
+                        Dim columnasExcluidas As New Dictionary(Of String, HashSet(Of String))(StringComparer.OrdinalIgnoreCase) From {
+                            {
+                                "tb_servicios_sistemas",
+                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                                    "ccveusuario_recibe",
+                                    "firmado",
+                                    "fchregistro_recibe",
+                                    "firma_recibe",
+                                    "foto_servicio"
+                                }
+                            }
+                        }
+
+                        ',
+                        '    {
+                        '        "tb_pacientes",
+                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                        '            "foto",
+                        '            "huella",
+                        '            "firma"
+                        '        }
+                        '    },
+                        '    {
+                        '        "tb_usuarios",
+                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                        '            "password",
+                        '            "salt",
+                        '            "token"
+                        '        }
+                        '    }
+
+                        Dim columnasExcluir As HashSet(Of String) = Nothing
+
+                        If Not columnasExcluidas.TryGetValue(table_name, columnasExcluir) Then
+                            'Si la tabla no existe en el diccionario, no excluye ninguna columna
+                            columnasExcluir = New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+                        End If
+
+
                         For col As Integer = 0 To tb_campos.Rows.Count - 1
 
                             campo_nombre = tb_campos.Rows(col).Item("Field").ToString
+
+                            'Excluir columnas especÃ­ficas de tb_servicios_sistemas
+                            If columnasExcluir.Contains(campo_nombre) Then
+                                Continue For
+                            End If
 
                             Dim tipo As String = ""
                             tipo = tb_campos.Rows(col).Item("Type")
@@ -1387,7 +1436,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un nï¿½mero aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -1726,7 +1775,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un nï¿½mero aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -2060,7 +2109,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un nï¿½mero aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -2511,7 +2560,7 @@ Public Class frmInterface
 #Region "Portal Cliente"
 
     ''' <summary>
-    ''' Configuarciones Varioas de Operación. Devielve el valor configurado en Datos de Unidad
+    ''' Configuarciones Varioas de Operaciï¿½n. Devielve el valor configurado en Datos de Unidad
     ''' </summary>
     ''' <param name="concepto"></param>
     ''' <returns></returns>
@@ -2541,7 +2590,7 @@ Public Class frmInterface
     '        Dim json As String = ""
     '        Dim url As String = ""
 
-    '        ' ======= CONFIGURACIÓN DE PROTOCOLOS DE SEGURIDAD ========
+    '        ' ======= CONFIGURACIï¿½N DE PROTOCOLOS DE SEGURIDAD ========
     '        ' Forzar el uso de TLS 1.2, TLS 1.1 y TLS 1.0
     '        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
 
@@ -2641,7 +2690,7 @@ Public Class frmInterface
                      Format(CDate(tb_cirugiascontrol.Rows(0).Item("fchCirugia").ToString), "HH:mm"), _
                      Me.UsuarioNombre(tb_cirugiascontrol.Rows(0).Item("ccvemedicoInterviene").ToString), _
                      "", "", "", _
-                     "CIRUGÍA", _
+                     "CIRUGï¿½A", _
                      Me.getValorConfiguracion("TIEMPO_INGRESO_CIRUGIAS"), _
                      cIndicacionesPaciente, _
                      cat_consultorio.Rows(0).Item("cDomicilio").ToString, _
@@ -2691,7 +2740,7 @@ Public Class frmInterface
             IdPlataforma = ssf_cirugiascontrol_central.Rows(i).Item("Id").ToString
 
             If Me.GuardarCx(ssf_cirugiascontrol_central, i) Then
-                '== Actualiza bandera de platafroma para terminar actualización == ==
+                '== Actualiza bandera de platafroma para terminar actualizaciï¿½n == ==
                 Me.Update_Central("Update ssf_cirugiascontrol set " & _
                                   "sinc = 1 " & _
                                   "where " & _
@@ -2868,7 +2917,7 @@ Public Class frmInterface
 
             'cClasificacionIngreso
             Dim ClasifIngreso As String
-            ClasifIngreso = "CIRUGÍA"
+            ClasifIngreso = "CIRUGï¿½A"
 
             Dim iDiasEstancia As Integer
             Try
@@ -2891,7 +2940,7 @@ Public Class frmInterface
                                        "clues = '" & tbcx_central.Rows(row_i).Item("clues").ToString & "', " & _
                                        "fchregistro=current_timestamp, " & _
                                        "ccvepaciente='" & CvePaciente & "', " & _
-                                       "clasificacion='CIRUGÍA', " & _
+                                       "clasificacion='CIRUGï¿½A', " & _
                                        "icvequirofano='" & tbcx_central.Rows(row_i).Item("quirofano_id").ToString & "', " & _
                                        "duracion='" & tbcx_central.Rows(row_i).Item("duracion_cirugia").ToString & "', " & _
                                        "ccvemedico='" & tbcx_central.Rows(row_i).Item("ccveusuario").ToString & "', " & _
@@ -3054,7 +3103,7 @@ no_insertar_cx:
             If email <> "" Then
                 If FacturacionEnviarOrdenInternamiento.EnviarOrdenInternamiento(nombre_completo, _
                                                                        email, _
-                                                                       "CONFIRMACIÓN DE ORDEN DE INTERNAMIENTO", _
+                                                                       "CONFIRMACIï¿½N DE ORDEN DE INTERNAMIENTO", _
                                                                         Mensaje, IdCirugia, False) Then
                 End If
             End If
@@ -3066,10 +3115,10 @@ no_insertar_cx:
             tb_mail = tb_Recordset_MySQL_local("Select email from cat_medico where ccvemedico = '" & CveMedicoAdscrito & "'")
 
             If tb_mail.Rows(0).Item("email").ToString <> "" Then
-                'Funciones.Msj_AdvOnly("El medico seleccionado no tiene correo electrónico registrado, deberá notificar vía telefónica")
+                'Funciones.Msj_AdvOnly("El medico seleccionado no tiene correo electrï¿½nico registrado, deberï¿½ notificar vï¿½a telefï¿½nica")
                 FacturacionEnviarOrdenInternamiento.EnviarOrdenInternamiento(nombre_completo, _
                                                                              tb_mail.Rows(0).Item("email").ToString, _
-                                                                             "CONFIRMACIÓN DE ORDEN DE INTERNAMIENTO", _
+                                                                             "CONFIRMACIï¿½N DE ORDEN DE INTERNAMIENTO", _
                                                                               Mensaje, IdCirugia, True)
             End If
             '********************************************************************************
@@ -4394,7 +4443,7 @@ intenta_otravz:
 
         If Me.WindowState = FormWindowState.Minimized Then
             Me.ShowInTaskbar = False
-            HistoMedicRPA.ShowBalloonTip(2000, "HistoMedic activo", "La aplicación sigue ejecutándose", ToolTipIcon.Info)
+            HistoMedicRPA.ShowBalloonTip(2000, "HistoMedic activo", "La aplicaciï¿½n sigue ejecutï¿½ndose", ToolTipIcon.Info)
         End If
 
     End Sub
@@ -4916,7 +4965,7 @@ no_insertar:
                 CveUnidad_Unitario = tb_paquetes_notificaciones.Rows(i).Item("ccveunidad_unitario").ToString
                 Descripcion = tb_paquetes_notificaciones.Rows(i).Item("descripcion").ToString
 
-                'Unidad Médica : Data_Sucursal()
+                'Unidad Mï¿½dica : Data_Sucursal()
                 'Datos de Paciente:	Data_Paciente
                 'Datos de Paquete:	Data_Paquete
                 'Datos Producto o Cant. Agregado(a) Fuera Pqt.:	Data_Producto
@@ -5075,21 +5124,93 @@ no_insertar:
 
     End Function
 
+#End Region
+
+#Region "Importar"
+
+
+    ''' <summary>
+    ''' Importar Firmas Recibido
+    ''' </summary>
+    ''' <remarks></remarks>
+    Private Sub ImportarFirmasRecibido()
+
+        Dim tb_servicios_sistemas As DataTable
+        tb_servicios_sistemas = tb_Recordset_MySQL_Central("SELECT " & _
+                                                          "tss.* " & _
+                                                          "FROM tb_servicios_sistemas tss " & _
+                                                          "where tss.sinc = 1 AND tss.firma_recibe = 1 LIMIT 5")
+
+        If tb_servicios_sistemas.Rows.Count = 0 Then
+            Exit Sub
+        End If
+
+        Try
+            Me.ProgressBarX1.Minimum = 0
+            Me.ProgressBarX1.Maximum = tb_servicios_sistemas.Rows.Count
+            Me.ProgressBarX1.Text = Me.ProgressBarX1.Text & " avance: 0 de " & tb_servicios_sistemas.Rows.Count
+        Catch ex2 As Exception
+        End Try
+
+        For i As Integer = 0 To tb_servicios_sistemas.Rows.Count - 1
+
+            '== Obtenemos el id de registro DE PORTAL == ==
+            Dim IdRegistroServicio_It As Integer = 0
+            IdRegistroServicio_It = tb_servicios_sistemas.Rows(i).Item("id").ToString
+
+            '== Verificamos si el id de servicio de plataforma existe en la DB local == ==
+            Dim tb_temp_servicios As DataTable
+            tb_temp_servicios = tb_Recordset_MySQL_local("Select id from tb_servicios_sistemas where id = '" & IdRegistroServicio_It & "'")
+
+            Dim IdClienteLocal As Integer = 0
+            If tb_temp_servicios.Rows.Count = 0 Then
+
+                LogEventos.Escribir("ADVERTENCIA: El servicio fimado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & " no existe en base de datos local, verifique.")
+
+                If Not Update_Central("tb_servicios_sistemas", _
+                               "sinc = 0", _
+                               "id", IdRegistroServicio_It) Then
+                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                End If
+
+            Else
+
+                If Not Update_local("tb_servicios_sistemas", _
+                             "ccveusuario_recibe = '" & tb_servicios_sistemas.Rows(i).Item("ccveusuario_recibe").ToString & "', " & _
+                             "fchregistro_recibe = '" & tb_servicios_sistemas.Rows(i).Item("fchregistro_recibe").ToString & "', " & _
+                             "firma_recibe = '" & tb_servicios_sistemas.Rows(i).Item("firma_recibe").ToString & "', " & _
+                             "foto_servicio = '" & tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString & "', " & _
+                             "sinc = 0", _
+                             "id", IdRegistroServicio_It) Then
+                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                End If
+
+                If Not Update_Central("tb_servicios_sistemas", _
+                               "sinc = 0", _
+                               "id", IdRegistroServicio_It) Then
+                    LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_servicios_sistemas en el portal con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                End If
+
+            End If
+
+            Me.ProgressBarX1.Value = Me.ProgressBarX1.Value + 1
+            Me.ProgressBarX1.Text = "ImportarFirmasRecibido. " & Me.ProgressBarX1.Value & " de " & Me.ProgressBarX1.Maximum
+
+        Next
+
+        Me.ProgressBarX1.Value = 0
+
+
+    End Sub
 
 
 
 #End Region
 
-#Region "Scripts"
-
-
-
-
-#End Region
 
 #Region "Actualizar Scripts DB"
 
-    Private Sub ActualizarDB()
+    Private Sub ActualizarDB_()
 
         'Proceso en segundo plano.
         Dim tb_scritp As DataTable
@@ -5144,7 +5265,7 @@ Public Class LogEventos
 
         Try
 
-            ' Verificar tamaño del log
+            ' Verificar tamaï¿½o del log
             If File.Exists(RutaLog) Then
 
                 Dim info As New FileInfo(RutaLog)

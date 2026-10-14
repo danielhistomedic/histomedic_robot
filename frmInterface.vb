@@ -140,7 +140,7 @@ Public Class frmInterface
 
             tb_ClienteData = tb_Recordset_MySQL_Admin("SELECT * FROM ssf_clientes WHERE clues = '" & clues & "'")
             If tb_ClienteData.Rows.Count = 0 Then
-                AgregarLog(500, ".Error de Conexi�n con el Servidor. ")
+                AgregarLog(500, ".Error de Conexión con el Servidor. ")
                 Return False
             End If
 
@@ -240,7 +240,7 @@ Public Class frmInterface
             ' Rutinas Importar 
             '======================================
 
-            '- - Importar Cirug�a agendada en el portal. - - - 
+            '- - Importar Cirugía agendada en el portal. - - - 
             Try
                 Me.ImportarCirugiaTemporal()
             Catch ex As Exception
@@ -262,6 +262,12 @@ Public Class frmInterface
                 LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
             End Try
 
+            '- - Activo Fijo - - - - - - - - - - - 
+            Try
+                ImportarFotoActivoFijo()
+            Catch ex As Exception
+                LogEventos.Escribir("ImportarFotoActivoFijo. " & ex.Message)
+            End Try
 
             '======================================
             ' Rutinas Exportar 
@@ -332,7 +338,7 @@ Public Class frmInterface
     End Sub
 
     ''' <summary>
-    ''' Sube al hosting el bloque de tablas GetQuery_TablasAlmacen, GetQuery_TablasEnlace, GetQuery_TablasEstudios, GetQuery_TablasMedicas
+    ''' Sube al hosting el bloque de tablas que no estan en GetQuery_TablasAlmacen, GetQuery_TablasEnlace, GetQuery_TablasEstudios, GetQuery_TablasMedicas
     ''' </summary>
     ''' <remarks></remarks>
     Private Sub ExportarDataToHostingSP()
@@ -400,7 +406,7 @@ Public Class frmInterface
 
                 Dim set_value As String = ""
 
-                ' Obtener llave primaria de caché o de BD
+                ' Obtener llave primaria de cachÃ© o de BD
                 If Not primaryKeyCache.TryGetValue(table_name, campo_llave) Then
                     Dim tb_campo_llave As DataTable = tb_Recordset_MySQL_localAsync("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
                     If tb_campo_llave.Rows.Count > 0 Then
@@ -554,6 +560,7 @@ Public Class frmInterface
                                     "firmado",
                                     "fchregistro_recibe",
                                     "firma_recibe",
+                                    "sinc",
                                     "foto_servicio"
                                 }
                             }
@@ -589,7 +596,7 @@ Public Class frmInterface
 
                             campo_nombre = tb_campos.Rows(col).Item("Field").ToString
 
-                            'Excluir columnas específicas de tb_servicios_sistemas
+                            'Excluir columnas especÃ­ficas de tb_servicios_sistemas
                             If columnasExcluir.Contains(campo_nombre) Then
                                 Continue For
                             End If
@@ -806,7 +813,7 @@ Public Class frmInterface
 
                 Dim set_value As String = ""
 
-                ' Obtener llave primaria de caché o de BD
+                ' Obtener llave primaria de cachÃ© o de BD
                 If Not primaryKeyCache.TryGetValue(table_name, campo_llave) Then
                     Dim tb_campo_llave As DataTable = tb_Recordset_MySQL_localAsyncALM("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
                     If tb_campo_llave.Rows.Count > 0 Then
@@ -951,9 +958,42 @@ Public Class frmInterface
                             columnCache(table_name) = tb_campos
                         End If
 
+
+                        'Diccionario con las columnas excluidas por tabla
+                        Dim columnasExcluidas As New Dictionary(Of String, HashSet(Of String))(StringComparer.OrdinalIgnoreCase) From {
+                            {
+                                "tb_almacen_existencias_series2",
+                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                                    "foto",
+                                    "sinc"
+                                }
+                            }
+                        }
+                        ',
+                        '    {
+                        '        "tb_pacientes",
+                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                        '            "foto",
+                        '            "huella",
+                        '            "firma"
+                        '        }
+                        '    },
+
+                        Dim columnasExcluir As HashSet(Of String) = Nothing
+
+                        If Not columnasExcluidas.TryGetValue(table_name, columnasExcluir) Then
+                            'Si la tabla no existe en el diccionario, no excluye ninguna columna
+                            columnasExcluir = New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+                        End If
+
                         For col As Integer = 0 To tb_campos.Rows.Count - 1
 
                             campo_nombre = tb_campos.Rows(col).Item("Field").ToString
+
+                            'Excluir columnas especÃ­ficas de tb_servicios_sistemas
+                            If columnasExcluir.Contains(campo_nombre) Then
+                                Continue For
+                            End If
 
                             Dim tipo As String = ""
                             tipo = tb_campos.Rows(col).Item("Type")
@@ -1055,7 +1095,7 @@ Public Class frmInterface
 
                 End If
 
-                ' Optimización del progreso de la barra de progreso (throttling de UI)
+                ' OptimizaciÃ³n del progreso de la barra de progreso (throttling de UI)
                 Dim current_val As Integer = i + 1
                 If i Mod 10 = 0 OrElse i = tb_his_replica_local.Rows.Count - 1 Then
                     Try
@@ -1436,7 +1476,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un n�mero aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -1775,7 +1815,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un n�mero aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -2109,7 +2149,7 @@ Public Class frmInterface
         Try
 
             'Dim random As New Random() ' Crea una instancia de la clase Random
-            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un n�mero aleatorio entre 1 y 9 (inclusive)
+            'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
             If Len(Me.txtLimitRegistros.Text) = 0 Then
@@ -2560,7 +2600,7 @@ Public Class frmInterface
 #Region "Portal Cliente"
 
     ''' <summary>
-    ''' Configuarciones Varioas de Operaci�n. Devielve el valor configurado en Datos de Unidad
+    ''' Configuarciones Varioas de Operación. Devielve el valor configurado en Datos de Unidad
     ''' </summary>
     ''' <param name="concepto"></param>
     ''' <returns></returns>
@@ -2590,7 +2630,7 @@ Public Class frmInterface
     '        Dim json As String = ""
     '        Dim url As String = ""
 
-    '        ' ======= CONFIGURACI�N DE PROTOCOLOS DE SEGURIDAD ========
+    '        ' ======= CONFIGURACIÓN DE PROTOCOLOS DE SEGURIDAD ========
     '        ' Forzar el uso de TLS 1.2, TLS 1.1 y TLS 1.0
     '        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
 
@@ -2690,7 +2730,7 @@ Public Class frmInterface
                      Format(CDate(tb_cirugiascontrol.Rows(0).Item("fchCirugia").ToString), "HH:mm"), _
                      Me.UsuarioNombre(tb_cirugiascontrol.Rows(0).Item("ccvemedicoInterviene").ToString), _
                      "", "", "", _
-                     "CIRUG�A", _
+                     "CIRUGÍA", _
                      Me.getValorConfiguracion("TIEMPO_INGRESO_CIRUGIAS"), _
                      cIndicacionesPaciente, _
                      cat_consultorio.Rows(0).Item("cDomicilio").ToString, _
@@ -2740,7 +2780,7 @@ Public Class frmInterface
             IdPlataforma = ssf_cirugiascontrol_central.Rows(i).Item("Id").ToString
 
             If Me.GuardarCx(ssf_cirugiascontrol_central, i) Then
-                '== Actualiza bandera de platafroma para terminar actualizaci�n == ==
+                '== Actualiza bandera de platafroma para terminar actualizaciÓn == ==
                 Me.Update_Central("Update ssf_cirugiascontrol set " & _
                                   "sinc = 1 " & _
                                   "where " & _
@@ -2917,7 +2957,7 @@ Public Class frmInterface
 
             'cClasificacionIngreso
             Dim ClasifIngreso As String
-            ClasifIngreso = "CIRUG�A"
+            ClasifIngreso = "CIRUGÍA"
 
             Dim iDiasEstancia As Integer
             Try
@@ -2940,7 +2980,7 @@ Public Class frmInterface
                                        "clues = '" & tbcx_central.Rows(row_i).Item("clues").ToString & "', " & _
                                        "fchregistro=current_timestamp, " & _
                                        "ccvepaciente='" & CvePaciente & "', " & _
-                                       "clasificacion='CIRUG�A', " & _
+                                       "clasificacion='CIRUGÍA', " & _
                                        "icvequirofano='" & tbcx_central.Rows(row_i).Item("quirofano_id").ToString & "', " & _
                                        "duracion='" & tbcx_central.Rows(row_i).Item("duracion_cirugia").ToString & "', " & _
                                        "ccvemedico='" & tbcx_central.Rows(row_i).Item("ccveusuario").ToString & "', " & _
@@ -3103,7 +3143,7 @@ no_insertar_cx:
             If email <> "" Then
                 If FacturacionEnviarOrdenInternamiento.EnviarOrdenInternamiento(nombre_completo, _
                                                                        email, _
-                                                                       "CONFIRMACI�N DE ORDEN DE INTERNAMIENTO", _
+                                                                       "CONFIRMACIÓN DE ORDEN DE INTERNAMIENTO", _
                                                                         Mensaje, IdCirugia, False) Then
                 End If
             End If
@@ -3115,10 +3155,10 @@ no_insertar_cx:
             tb_mail = tb_Recordset_MySQL_local("Select email from cat_medico where ccvemedico = '" & CveMedicoAdscrito & "'")
 
             If tb_mail.Rows(0).Item("email").ToString <> "" Then
-                'Funciones.Msj_AdvOnly("El medico seleccionado no tiene correo electr�nico registrado, deber� notificar v�a telef�nica")
+                'Funciones.Msj_AdvOnly("El medico seleccionado no tiene correo electrónico registrado, deberá notificar vía telefónica")
                 FacturacionEnviarOrdenInternamiento.EnviarOrdenInternamiento(nombre_completo, _
                                                                              tb_mail.Rows(0).Item("email").ToString, _
-                                                                             "CONFIRMACI�N DE ORDEN DE INTERNAMIENTO", _
+                                                                             "CONFIRMACIÓN DE ORDEN DE INTERNAMIENTO", _
                                                                               Mensaje, IdCirugia, True)
             End If
             '********************************************************************************
@@ -4443,7 +4483,7 @@ intenta_otravz:
 
         If Me.WindowState = FormWindowState.Minimized Then
             Me.ShowInTaskbar = False
-            HistoMedicRPA.ShowBalloonTip(2000, "HistoMedic activo", "La aplicaci�n sigue ejecut�ndose", ToolTipIcon.Info)
+            HistoMedicRPA.ShowBalloonTip(2000, "HistoMedic activo", "La aplicación sigue ejecutándose", ToolTipIcon.Info)
         End If
 
     End Sub
@@ -4462,6 +4502,7 @@ intenta_otravz:
 
         If Me.Conectar_Local() Then
 
+            'SELECT ftp_usuario, ftp_password FROM cat_consultorio t;
             Dim tb_cat_consultorio As DataTable
             tb_cat_consultorio = tb_Recordset_MySQL_local("Select cClues, ftp_usuario, ftp_password, cSiglas from cat_consultorio")
             Me.CLUES = tb_cat_consultorio.Rows(0).Item("cClues").ToString
@@ -4965,7 +5006,7 @@ no_insertar:
                 CveUnidad_Unitario = tb_paquetes_notificaciones.Rows(i).Item("ccveunidad_unitario").ToString
                 Descripcion = tb_paquetes_notificaciones.Rows(i).Item("descripcion").ToString
 
-                'Unidad M�dica : Data_Sucursal()
+                'Unidad Médica : Data_Sucursal()
                 'Datos de Paciente:	Data_Paciente
                 'Datos de Paquete:	Data_Paquete
                 'Datos Producto o Cant. Agregado(a) Fuera Pqt.:	Data_Producto
@@ -5139,7 +5180,7 @@ no_insertar:
         tb_servicios_sistemas = tb_Recordset_MySQL_Central("SELECT " & _
                                                           "tss.* " & _
                                                           "FROM tb_servicios_sistemas tss " & _
-                                                          "where tss.sinc = 1 AND tss.firma_recibe = 1 LIMIT 5")
+                                                          "where tss.sinc = 1 AND tss.firmado = 1 LIMIT 5")
 
         If tb_servicios_sistemas.Rows.Count = 0 Then
             Exit Sub
@@ -5175,20 +5216,87 @@ no_insertar:
 
             Else
 
-                If Not Update_local("tb_servicios_sistemas", _
-                             "ccveusuario_recibe = '" & tb_servicios_sistemas.Rows(i).Item("ccveusuario_recibe").ToString & "', " & _
-                             "fchregistro_recibe = '" & tb_servicios_sistemas.Rows(i).Item("fchregistro_recibe").ToString & "', " & _
-                             "firma_recibe = '" & tb_servicios_sistemas.Rows(i).Item("firma_recibe").ToString & "', " & _
-                             "foto_servicio = '" & tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString & "', " & _
-                             "sinc = 0", _
-                             "id", IdRegistroServicio_It) Then
-                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                '== PASO 1: Descargar imagen desde FTP remoto a carpeta temporal == ==
+                Dim NombreFotoServicio As String = tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString
+                If NombreFotoServicio <> "" Then
+                    Try
+                        '-- Ruta temporal local para guardar la imagen descargada --
+                        Dim RutaTemporal As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Histomedic")
+                        If Not System.IO.Directory.Exists(RutaTemporal) Then
+                            System.IO.Directory.CreateDirectory(RutaTemporal)
+                        End If
+                        Dim ArchivoTemporal As String = System.IO.Path.Combine(RutaTemporal, NombreFotoServicio)
+                        Try
+                            System.IO.File.Delete(ArchivoTemporal)
+                        Catch ex As Exception
+                        End Try
+
+                        '-- Datos FTP remoto (histomedic.mx) --
+                        Dim FTP_Remoto_Host As String = "ftp://histomedic.mx"
+                        Dim FTP_Remoto_Usuario As String = "ftp_admin@histomedic.mx"
+                        Dim FTP_Remoto_Password As String = "Jhytmd2cKb*5"
+                        Dim FTP_Remoto_Ruta As String = FTP_Remoto_Host & "/portal.histomedic.mx/Assets/files/servicios/" & NombreFotoServicio
+
+                        Try
+                            My.Computer.Network.DownloadFile(FTP_Remoto_Ruta, ArchivoTemporal, FTP_Remoto_Usuario, FTP_Remoto_Password)
+                            'LogEventos.Escribir("Imagen descargada desde FTP remoto: " & NombreFotoServicio & " para el servicio id: " & IdRegistroServicio_It.ToString())
+                        Catch ex As Exception
+                            LogEventos.Escribir("Error al descargar imagen desde FTP remoto para servicio id: " & IdRegistroServicio_It.ToString() & " - " & ex.Message)
+                        End Try
+
+
+                        '== PASO 2: Subir imagen al FTP local (127.0.0.1) en carpeta FTP_SERVICIOS == ==
+                        If System.IO.File.Exists(ArchivoTemporal) Then
+                            Try
+                                Dim FTP_Local_Host As String = IpServidor
+                                Dim FTP_Local_Usuario As String = Me.FTP_USUARIO
+                                Dim FTP_Local_Password As String = Me.FTP_PASSWORD
+                                Dim FTP_Local_Ruta As String = "ftp://" & FTP_Local_Host & "/FTP_SERVICIOS/" & NombreFotoServicio
+
+                                Dim ftpRequest As System.Net.FtpWebRequest = CType(System.Net.WebRequest.Create(FTP_Local_Ruta), System.Net.FtpWebRequest)
+                                ftpRequest.Method = System.Net.WebRequestMethods.Ftp.UploadFile
+                                ftpRequest.Credentials = New System.Net.NetworkCredential(FTP_Local_Usuario, FTP_Local_Password)
+                                ftpRequest.UseBinary = True
+                                ftpRequest.UsePassive = True
+                                ftpRequest.KeepAlive = False
+
+                                Dim bytesArchivo() As Byte = System.IO.File.ReadAllBytes(ArchivoTemporal)
+                                ftpRequest.ContentLength = bytesArchivo.Length
+
+                                Using streamSalida As System.IO.Stream = ftpRequest.GetRequestStream()
+                                    streamSalida.Write(bytesArchivo, 0, bytesArchivo.Length)
+                                End Using
+
+                                Using ftpResponse As System.Net.FtpWebResponse = CType(ftpRequest.GetResponse(), System.Net.FtpWebResponse)
+                                    'LogEventos.Escribir("Imagen subida a FTP local (FTP_SERVICIOS): " & NombreFotoServicio & " - Estado: " & ftpResponse.StatusDescription.Trim())
+                                End Using
+
+                            Catch ex As Exception
+                                LogEventos.Escribir("Error al subir imagen al FTP local para servicio id: " & IdRegistroServicio_It.ToString() & " - " & ex.Message)
+                            End Try
+                        End If
+
+                    Catch ex As Exception
+                        LogEventos.Escribir("Error general al procesar imagen FTP del servicio id: " & IdRegistroServicio_It.ToString() & " - " & ex.Message)
+                    End Try
                 End If
 
-                If Not Update_Central("tb_servicios_sistemas", _
-                               "sinc = 0", _
-                               "id", IdRegistroServicio_It) Then
-                    LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_servicios_sistemas en el portal con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                If Not Update_local("tb_servicios_sistemas", _
+                                     "estatus = '" & tb_servicios_sistemas.Rows(i).Item("estatus").ToString & "', " & _
+                                     "firmado = '" & tb_servicios_sistemas.Rows(i).Item("firmado").ToString & "', " & _
+                                     "ccveusuario_recibe = '" & tb_servicios_sistemas.Rows(i).Item("ccveusuario_recibe").ToString & "', " & _
+                                     "fchregistro_recibe = '" & Format(CDate(tb_servicios_sistemas.Rows(i).Item("fchregistro_recibe").ToString), "yyyy-MM-dd HH:mm:ss") & "', " & _
+                                     "firma_recibe = '" & tb_servicios_sistemas.Rows(i).Item("firma_recibe").ToString & "', " & _
+                                     "foto_servicio = '" & tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString & "', " & _
+                                     "sinc = 0", _
+                                     "id", IdRegistroServicio_It) Then
+                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                Else
+                    If Not Update_Central("tb_servicios_sistemas", _
+                              "sinc = 0", _
+                              "id", IdRegistroServicio_It) Then
+                        LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_servicios_sistemas en el portal con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
+                    End If
                 End If
 
             End If
@@ -5204,9 +5312,144 @@ no_insertar:
     End Sub
 
 
+    ''' <summary>
+    ''' Importar Foto Activo Fijo
+    ''' </summary>
+    ''' <remarks></remarks>
+    Private Sub ImportarFotoActivoFijo()
+
+        Dim tb_foto_activo_fijo As DataTable
+        tb_foto_activo_fijo = tb_Recordset_MySQL_Central("SELECT " & _
+                                                          "t.Id, t.foto, t.sinc " & _
+                                                          "FROM tb_almacen_existencias_series2 t " & _
+                                                          "where t.sinc = 1 LIMIT 5")
+
+        If tb_foto_activo_fijo.Rows.Count = 0 Then
+            Exit Sub
+        End If
+
+        Try
+            Me.ProgressBarX1.Minimum = 0
+            Me.ProgressBarX1.Maximum = tb_foto_activo_fijo.Rows.Count
+            Me.ProgressBarX1.Text = Me.ProgressBarX1.Text & " avance: 0 de " & tb_foto_activo_fijo.Rows.Count
+        Catch ex2 As Exception
+        End Try
+
+        For i As Integer = 0 To tb_foto_activo_fijo.Rows.Count - 1
+
+            '== Obtenemos el id de registro DE PORTAL == ==
+            Dim IdRegistroFoto_It As Integer = 0
+            IdRegistroFoto_It = tb_foto_activo_fijo.Rows(i).Item("Id").ToString
+
+            '== Verificamos si el id de foto de plataforma existe en la DB local == ==
+            Dim tb_temp_foto_activo_fijo As DataTable
+            tb_temp_foto_activo_fijo = tb_Recordset_MySQL_local("Select id from tb_almacen_existencias_series2 where id = '" & IdRegistroFoto_It & "'")
+
+            Dim IdClienteLocal As Integer = 0
+            If tb_temp_foto_activo_fijo.Rows.Count = 0 Then
+
+                LogEventos.Escribir("ADVERTENCIA: EL reigstro de la foto con id: " & tb_foto_activo_fijo.Rows(i).Item("Id").ToString & " no existe en base de datos local, verifique.")
+
+                If Not Update_Central("tb_almacen_existencias_series2", _
+                                      "sinc = 0", _
+                                      "Id", IdRegistroFoto_It) Then
+                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_almacen_existencias_series2 la foto con el id: " & tb_foto_activo_fijo.Rows(i).Item("Id").ToString & "")
+                End If
+
+            Else
+
+                '== PASO 1: Descargar imagen desde FTP remoto a carpeta temporal == ==
+                Dim NombreFotoActivoFijo As String = tb_foto_activo_fijo.Rows(i).Item("foto").ToString
+                If NombreFotoActivoFijo <> "" Then
+                    Try
+                        '-- Ruta temporal local para guardar la imagen descargada --
+                        Dim RutaTemporal As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Histomedic")
+                        If Not System.IO.Directory.Exists(RutaTemporal) Then
+                            System.IO.Directory.CreateDirectory(RutaTemporal)
+                        End If
+                        Dim ArchivoTemporal As String = System.IO.Path.Combine(RutaTemporal, NombreFotoActivoFijo)
+                        Try
+                            System.IO.File.Delete(ArchivoTemporal)
+                        Catch ex As Exception
+                        End Try
+
+                        '-- Datos FTP remoto (histomedic.mx) --
+                        Dim FTP_Remoto_Host As String = "ftp://histomedic.mx"
+                        Dim FTP_Remoto_Usuario As String = "ftp_admin@histomedic.mx"
+                        Dim FTP_Remoto_Password As String = "Jhytmd2cKb*5"
+                        Dim FTP_Remoto_Ruta As String = FTP_Remoto_Host & "/portal.histomedic.mx/Assets/files/activofijo/" & NombreFotoActivoFijo
+
+                        Try
+                            My.Computer.Network.DownloadFile(FTP_Remoto_Ruta, ArchivoTemporal, FTP_Remoto_Usuario, FTP_Remoto_Password)
+                            'LogEventos.Escribir("Imagen descargada desde FTP remoto: " & NombreFotoActivoFijo & " para el tb_almacen_existencias_series2.id: " & IdRegistroFoto_It.ToString())
+                        Catch ex As Exception
+                            LogEventos.Escribir("Error al descargar imagen desde FTP remoto para tb_almacen_existencias_series2.id: " & IdRegistroFoto_It.ToString() & " - " & ex.Message)
+                        End Try
+
+                        '== PASO 2: Subir imagen al FTP local (127.0.0.1) en carpeta FTP_ACTIVO_FIJO == ==
+                        If System.IO.File.Exists(ArchivoTemporal) Then
+                            Try
+                                Dim FTP_Local_Host As String = IpServidor
+                                Dim FTP_Local_Usuario As String = Me.FTP_USUARIO
+                                Dim FTP_Local_Password As String = Me.FTP_PASSWORD
+                                Dim FTP_Local_Ruta As String = "ftp://" & FTP_Local_Host & "/FTP_ACTIVO_FIJO/" & NombreFotoActivoFijo
+
+                                Dim ftpRequest As System.Net.FtpWebRequest = CType(System.Net.WebRequest.Create(FTP_Local_Ruta), System.Net.FtpWebRequest)
+                                ftpRequest.Method = System.Net.WebRequestMethods.Ftp.UploadFile
+                                ftpRequest.Credentials = New System.Net.NetworkCredential(FTP_Local_Usuario, FTP_Local_Password)
+                                ftpRequest.UseBinary = True
+                                ftpRequest.UsePassive = True
+                                ftpRequest.KeepAlive = False
+
+                                Dim bytesArchivo() As Byte = System.IO.File.ReadAllBytes(ArchivoTemporal)
+                                ftpRequest.ContentLength = bytesArchivo.Length
+
+                                Using streamSalida As System.IO.Stream = ftpRequest.GetRequestStream()
+                                    streamSalida.Write(bytesArchivo, 0, bytesArchivo.Length)
+                                End Using
+
+                                Using ftpResponse As System.Net.FtpWebResponse = CType(ftpRequest.GetResponse(), System.Net.FtpWebResponse)
+                                    'LogEventos.Escribir("Imagen subida a FTP local (FTP_ACTIVO_FIJO): " & NombreFotoActivoFijo & " - Estado: " & ftpResponse.StatusDescription.Trim())
+                                End Using
+
+                            Catch ex As Exception
+                                LogEventos.Escribir("Error al subir imagen al FTP local para tb_almacen_existencias_series2.id: " & IdRegistroFoto_It.ToString() & " - " & ex.Message)
+                            End Try
+                        End If
+
+                    Catch ex As Exception
+                        LogEventos.Escribir("Error general al procesar imagen FTP del tb_almacen_existencias_series2.id: " & IdRegistroFoto_It.ToString() & " - " & ex.Message)
+                    End Try
+                End If
+
+                If Not Update_local("tb_almacen_existencias_series2", _
+                                     "foto = '" & tb_foto_activo_fijo.Rows(i).Item("foto").ToString & "', " & _
+                                     "sinc = 0", _
+                                     "id", IdRegistroFoto_It) Then
+                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_almacen_existencias_series2 del id: " & tb_foto_activo_fijo.Rows(i).Item("Id").ToString & "")
+
+                Else
+                    If Not Update_Central("tb_almacen_existencias_series2", _
+                                    "sinc = 0", _
+                                    "id", IdRegistroFoto_It) Then
+                        LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_almacen_existencias_series2 en el portal con id: " & tb_foto_activo_fijo.Rows(i).Item("Id").ToString & "")
+                    End If
+                End If
+
+            End If
+
+            Me.ProgressBarX1.Value = Me.ProgressBarX1.Value + 1
+            Me.ProgressBarX1.Text = "ImportarFotoActivoFijo. " & Me.ProgressBarX1.Value & " de " & Me.ProgressBarX1.Maximum
+
+        Next
+
+        Me.ProgressBarX1.Value = 0
+
+
+    End Sub
+
 
 #End Region
-
 
 #Region "Actualizar Scripts DB"
 
@@ -5265,7 +5508,7 @@ Public Class LogEventos
 
         Try
 
-            ' Verificar tama�o del log
+            ' Verificar tamaño del log
             If File.Exists(RutaLog) Then
 
                 Dim info As New FileInfo(RutaLog)

@@ -14,7 +14,7 @@ Imports System.Runtime.InteropServices
 <Assembly: AssemblyDescription("Enlace de Datos Bidireccional Local a Hosting HistoMedic")> 
 <Assembly: AssemblyCompany("HistoMedic")> 
 <Assembly: AssemblyProduct("Enlace HistoMedic DataLocal-DataHosting")> 
-<Assembly: AssemblyCopyright("Derechos Reservados©HistoMedic 2025")> 
+<Assembly: AssemblyCopyright("Derechos Reservados©HistoMedic 2026")> 
 <Assembly: AssemblyTrademark("")> 
 
 <Assembly: ComVisible(False)> 
@@ -33,7 +33,7 @@ Imports System.Runtime.InteropServices
 ' mediante el asterisco ('*'), como se muestra a continuación:
 ' <Assembly: AssemblyVersion("1.0.*")> 
 
-<Assembly: AssemblyVersion("2.3.1.260")> 
-<Assembly: AssemblyFileVersion("2.3.1.260")> 
+<Assembly: AssemblyVersion("2.3.1.268")> 
+<Assembly: AssemblyFileVersion("2.3.1.268")> 
 
 <Assembly: NeutralResourcesLanguageAttribute("")> 

@@ -1,1 +1,0 @@
-Usa exclusivamente sintaxis de VB.NET, sigue los estándares de arquitectura limpia del proyecto y realiza pruebas de compilación tras cada modificación

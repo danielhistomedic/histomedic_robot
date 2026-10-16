@@ -5201,7 +5201,7 @@ no_insertar:
             Dim importe_lista As Double = Funciones.getImporteClasificacionNew(CveMaterial, cantidad, PacienteListaPrecios(CvePaciente))
             PrecioVenta = importe_lista
 
-            PrecioPublico = MaterialPrecioPublicoGeneral(CveMaterial)
+            PrecioPublico = Funciones.MaterialPrecioPublicoGeneral(CveMaterial)
             ' === Determina el importe del Producto Fin ===
 
 
@@ -5268,9 +5268,9 @@ no_insertar:
                 End If
 
                 '**Obtenemos el valor del producto aplicando el factor de IVA*********************************************
-                If MaterialCausaIVA(CveMaterial) Then
+                If Funciones.MaterialCausaIVA(CveMaterial) Then
                     Try
-                        PrecioVenta = Funciones.Numero_Redondear((PrecioVenta / IvaFactorAumenta()), 2)
+                        PrecioVenta = Funciones.Numero_Redondear((PrecioVenta / Funciones.IvaFactorAumenta()), 2)
                     Catch ex As Exception
                         PrecioVenta = 0
                         GoTo ff
@@ -5294,7 +5294,7 @@ no_insertar:
 
                     If Insert_local("tb_ticketsec_detalle", _
                                            "clues = '" & Me.CLUES & "', " & _
-                                            "icveticketec='" & TicketEC_Id(NumCuenta) & "', " & _
+                                            "icveticketec='" & Funciones.TicketEC_Id(NumCuenta) & "', " & _
                                             "cNumTicketEC='" & NumCuenta & "', " & _
                                             "iCantidad='" & cantidad & "', " & _
                                             "cDescripcion='" & Descripcion & "', " & _
@@ -5305,7 +5305,7 @@ no_insertar:
                                             "ccveanterior='" & Material_CveAnterior(CveMaterial) & "', " & _
                                             "ccveunidad='" & cveunidad & "', " & _
                                             "iPrecioVenta='" & PrecioVenta & "', " & _
-                                            "iPrecioPublico='" & Me.PrecioPublico & "', " & _
+                                            "iPrecioPublico='" & PrecioPublico & "', " & _
                                             "iPrecioSujetoCatOficial='" & Material_SujetoCostoOficial(CveMaterial) & "', " & _
                                             "cExentoIVa='" & Material_ExentoIVA(CveMaterial) & "', " & _
                                             "cNumLote='', " & _
@@ -5349,7 +5349,7 @@ no_insertar:
                         Importe_it = Funciones.getImporteClasificacionNew(CveMaterial, iCantidad_it, PacienteListaPrecios(CvePaciente))
                         If Material_ExentoIVA(CveMaterial) = "I" Then
                             Try
-                                Importe_it = Format(Funciones.Numero_Redondear((Importe_it / IvaFactorAumenta()), 2), "##,##0.00")
+                                Importe_it = Format(Funciones.Numero_Redondear((Importe_it / Funciones.IvaFactorAumenta()), 2), "##,##0.00")
                             Catch ex As Exception
                                 Importe_it = 0
                             End Try
@@ -5357,7 +5357,7 @@ no_insertar:
 
                         If Insert_local("tb_ticketsec_detalle", _
                                           "clues = '" & Me.CLUES & "', " & _
-                                           "icveticketec='" & TicketEC_Id(NumCuenta) & "', " & _
+                                           "icveticketec='" & Funciones.TicketEC_Id(NumCuenta) & "', " & _
                                            "cNumTicketEC='" & NumCuenta & "', " & _
                                            "iCantidad='" & iCantidad_it & "', " & _
                                            "cDescripcion='" & Descripcion & "', " & _
@@ -5368,7 +5368,7 @@ no_insertar:
                                            "ccveanterior='" & Material_CveAnterior(CveMaterial) & "', " & _
                                            "ccveunidad='" & cveunidad & "', " & _
                                            "iPrecioVenta='" & Importe_it & "', " & _
-                                           "iPrecioPublico='" & Me.PrecioPublico & "', " & _
+                                           "iPrecioPublico='" & PrecioPublico & "', " & _
                                            "iPrecioSujetoCatOficial='" & Material_SujetoCostoOficial(CveMaterial) & "', " & _
                                            "cExentoIVa='" & Material_ExentoIVA(CveMaterial) & "', " & _
                                            "cNumLote='', " & _
@@ -5519,67 +5519,6 @@ ff:
     End Function
 
     ''' <summary>
-    ''' True = Causa IVA
-    ''' </summary>
-    ''' <param name="ccvematerial"></param>
-    ''' <returns></returns>
-    ''' <remarks></remarks>
-    Private Function MaterialCausaIVA(ByVal ccvematerial As String) As Boolean
-
-        Dim tb_materiales As DataTable
-        tb_materiales = tb_Recordset_MySQL_local("Select iExcentoIVA  " & _
-                                                 "from tb_materiales where ccvematerial = '" & ccvematerial & "'")
-        Try
-            If tb_materiales.Rows(0).Item(0).ToString = "I" Then
-                Return True
-            End If
-            Return False
-        Catch ex As Exception
-            Return False
-        End Try
-
-        Return False
-
-    End Function
-
-    ''' <summary>
-    ''' Multiplica por factor 1.16
-    ''' </summary>
-    ''' <returns></returns>
-    ''' <remarks></remarks>
-    Private Function IvaFactorAumenta() As Double
-
-        Dim tb As DataTable
-        tb = tb_Recordset_MySQL_local("Select iFactor from cat_impuestos where " & _
-                                              "iVigente = '1'")
-        Try
-            Return tb.Rows(0).Item(0).ToString
-        Catch ex As Exception
-            Return 1
-        End Try
-
-        Return 1
-
-    End Function
-
-    Private Function TicketEC_Id(ByVal NumTicket As String) As Integer
-
-        Dim ClaveCons As Integer
-        Dim tb As Data.DataTable
-        tb = tb_Recordset_MySQL_local("SELECT icveticketec FROM tb_ticketsec where " & _
-                                           "cNumTicketec = '" & NumTicket & "'")
-
-        Try
-            Return tb.Rows(0).Item(0).ToString
-        Catch ex As Exception
-            Return 0
-        End Try
-
-        Return 0
-
-    End Function
-
-    ''' <summary>
     ''' Muestra la Descripcion y Presentacion del material concatenados.
     ''' </summary>
     ''' <param name="ccvematerial"></param>
@@ -5668,26 +5607,7 @@ ff:
 
     End Function
 
-    ''' <summary>
-    ''' Precion de Publico General 
-    ''' </summary>
-    ''' <param name="ccvematerial"></param>
-    ''' <returns></returns>
-    ''' <remarks></remarks>
-    Private Function MaterialPrecioPublicoGeneral(ByVal ccvematerial As String) As Double
-
-        Dim tb_materiales As DataTable
-        tb_materiales = tb_Recordset_MySQL_local("Select iPrecioPublicoOficial " & _
-                                                  "from tb_materiales where ccvematerial = '" & ccvematerial & "'")
-        Try
-            Return tb_materiales.Rows(0).Item(0).ToString
-        Catch ex As Exception
-            Return 0
-        End Try
-
-        Return 0
-
-    End Function
+  
 
 #End Region
 

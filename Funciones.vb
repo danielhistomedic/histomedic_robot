@@ -587,8 +587,6 @@ Public Class Funciones
 
     End Function
 
-    'Funciones de Operación con Numeros
-
     Shared Function Numero_Redondear(ByVal dNumero As Double, ByVal iDecimales As Integer) As Double
 
         Dim dRetorno As Double
@@ -651,15 +649,9 @@ Public Class Funciones
 
     End Function
 
-    ''' <summary>
-    ''' 0.16 o el valor vigente
-    ''' </summary>
-    ''' <returns></returns>
-    ''' <remarks></remarks>
-
     Shared Function TicketEC_Id(ByVal NumTicket As String) As Integer
 
-   
+
         Dim tb As Data.DataTable
         tb = frmInterface.tb_Recordset_MySQL_local("SELECT icveticketec FROM tb_ticketsec where " & _
                                            "cNumTicketec = '" & NumTicket & "'")
@@ -1305,8 +1297,31 @@ valida_cantidad_2:
 
     End Function
 
-#End Region
+    ''' <summary>
+    ''' True = Causa IVA
+    ''' </summary>
+    ''' <param name="ccvematerial"></param>
+    ''' <returns></returns>
+    ''' <remarks></remarks>
+    Shared Function MaterialCausaIVA(ByVal ccvematerial As String) As Boolean
 
+        Dim tb_materiales As DataTable
+        tb_materiales = frmInterface.tb_Recordset_MySQL_local("Select iExcentoIVA  " & _
+                                                 "from tb_materiales where ccvematerial = '" & ccvematerial & "'")
+        Try
+            If tb_materiales.Rows(0).Item(0).ToString = "I" Then
+                Return True
+            End If
+            Return False
+        Catch ex As Exception
+            Return False
+        End Try
+
+        Return False
+
+    End Function
+
+#End Region
 
 #Region "Otras Funciones"
 
@@ -1334,6 +1349,65 @@ valida_cantidad_2:
 
     End Function
 
+    Shared Function Get_FechaHoraIngresoHospitalario(ByVal ClavePaciente As String, ByVal IdRecepcion As Integer) As Date
+
+        'fchhorarecepcion, fchhoraegreso
+        Dim tbegre As DataTable
+        tbegre = frmInterface.tb_Recordset_MySQL_local("Select id, fchEgresa " & _
+                                                     "from tb_notamedica_egreso where " & _
+                                                     "ccvepaciente = '" & ClavePaciente & "' and " & _
+                                                     "id_recepcion = '" & IdRecepcion & "' " & _
+                                                     "order by fchregistro desc")
+        If tbegre.Rows.Count > 0 Then
+            Try
+                Return CDate(Format(tbegre.Rows(0).Item(1), "dd/MM/yyyy HH:mm"))
+            Catch ex As Exception
+                Return Funciones.Calcula_FechaActual
+            End Try
+        End If
+
+        Dim tb_ingreso As DataTable
+        tb_ingreso = frmInterface.tb_Recordset_MySQL_local("Select tb_urg_recepcion.id, tb_urg_recepcion.fchregistro, tb_urg_recepcion.fchhorarecepcion, tb_urg_recepcion.fchregistro_Egr, tb_urg_recepcion.iHora_Egr " & _
+                                                      "from tb_urg_recepcion " & _
+                                                      "INNER JOIN cat_servicios ON (cat_servicios.cdscservicio = tb_urg_recepcion.cdscareaafectada) " & _
+                                                      "where " & _
+                                                      "(cat_servicios.cdscareaafectada = 'HOSPITALIZACION' OR cat_servicios.cdscareaafectada = 'URGENCIAS') AND " & _
+                                                      "tb_urg_recepcion.ccvepaciente = '" & ClavePaciente & "' " & _
+                                                      "order by tb_urg_recepcion.fchhorarecepcion desc")
+        If tb_ingreso.Rows.Count = 0 Then
+            Return Funciones.Calcula_FechaActual
+        End If
+
+        Dim i As Integer = 0
+
+        If tb_ingreso.Rows.Count = 1 Then
+            Return CDate(Format(tb_ingreso.Rows(0).Item(2), "dd/MM/yyyy HH:mm"))
+        End If
+
+        For i = 0 To tb_ingreso.Rows.Count - 1
+            Try
+
+                Dim fechaegr As Date
+                Dim fechaegr_str As String
+                Dim hora_str As String
+
+                fechaegr_str = Format(CDate(tb_ingreso.Rows(i + 1).Item(3)), "dd/MM/yyyy")
+                hora_str = tb_ingreso.Rows(i + 1).Item(4).ToString
+                fechaegr = CDate(fechaegr_str & " " & hora_str)
+
+                Dim horas As Integer
+                horas = DateDiff(DateInterval.Hour, fechaegr, CDate(tb_ingreso.Rows(i).Item(2)))
+                If horas >= 6 Then
+                    Return CDate(Format(tb_ingreso.Rows(i).Item(2), "dd/MM/yyyy HH:mm"))
+                End If
+            Catch ex As Exception
+                Return CDate(Format(tb_ingreso.Rows(i).Item(2), "dd/MM/yyyy HH:mm"))
+            End Try
+        Next
+
+        Return Funciones.Calcula_FechaActual
+
+    End Function
 
 #End Region
 

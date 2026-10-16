@@ -1,4 +1,4 @@
-
+ï»¿
 Imports System.IO
 Imports System.Net
 Imports System.Net.NetworkInformation
@@ -44,7 +44,7 @@ Public Class Funciones
     ''' Devuelve la Ruta Donde se creo el archivo pdf
     ''' </summary>
     ''' <param name="ReporteOptions"></param>
-    ''' <param name="NombreDocumento">Nombre con el que se guardará el archivo pdf temporal</param>
+    ''' <param name="NombreDocumento">Nombre con el que se guardarÃ¡ el archivo pdf temporal</param>
     ''' <returns></returns>
     ''' <remarks></remarks>
     Shared Function CrearPDF(ByVal ReporteOptions As CrystalDecisions.Shared.ExportOptions, _
@@ -185,9 +185,9 @@ Public Class Funciones
 
         Dim strAniosTranscurridos As String
         If intAniosTranscurridos = 1 Then
-            strAniosTranscurridos = intAniosTranscurridos & " año"
+            strAniosTranscurridos = intAniosTranscurridos & " aÃ±o"
         Else
-            strAniosTranscurridos = intAniosTranscurridos & " años"
+            strAniosTranscurridos = intAniosTranscurridos & " aÃ±os"
         End If
 
         Dim strMesesTranscurridos As String
@@ -228,9 +228,9 @@ Public Class Funciones
 
     Shared Function verificaConexionInternet() As Boolean
 
-        ' ===== Verifica Actualización Disponible ==============================
+        ' ===== Verifica ActualizaciÃ³n Disponible ==============================
 
-        'Console.WriteLine("Verificando conexión a Internet...")
+        'Console.WriteLine("Verificando conexiÃ³n a Internet...")
         Dim interfaces As NetworkInterface() = NetworkInterface.GetAllNetworkInterfaces()
 
         For Each interfaz As NetworkInterface In interfaces
@@ -238,27 +238,27 @@ Public Class Funciones
             If interfaz.OperationalStatus = OperationalStatus.Up Then
 
                 'Console.WriteLine("Interfaz: " & interfaz.Name & " - Estado: Disponible")
-                ' Verificar conexión a internet con un Ping a Google
+                ' Verificar conexiÃ³n a internet con un Ping a Google
                 If Funciones.IsInternetAvailable(interfaz) Then
-                    'Console.WriteLine("  Conexión a internet: Disponible")
+                    'Console.WriteLine("  ConexiÃ³n a internet: Disponible")
                     Return True
 
                 Else
-                    'Console.WriteLine("  Conexión a internet: No disponible")
+                    'Console.WriteLine("  ConexiÃ³n a internet: No disponible")
                 End If
             Else
                 'Console.WriteLine("Interfaz: " & interfaz.Name & " - Estado: Desconectada")
             End If
         Next
 
-        'Console.WriteLine("Verificación completada.")
+        'Console.WriteLine("VerificaciÃ³n completada.")
         ' ===========================================================================
         Return False
 
     End Function
 
     ''' <summary>
-    ''' Verificar si hay internet para checar la actulización del sistema
+    ''' Verificar si hay internet para checar la actulizaciÃ³n del sistema
     ''' </summary>
     ''' <param name="networkInterface"></param>
     ''' <returns></returns>
@@ -290,7 +290,7 @@ Public Class Funciones
         Dim result As String = ""
         Dim url As String = ""
 
-        ' ======= CONFIGURACIÓN DE PROTOCOLOS DE SEGURIDAD ========
+        ' ======= CONFIGURACIÃ“N DE PROTOCOLOS DE SEGURIDAD ========
         ' Forzar el uso de TLS 1.2, TLS 1.1 y TLS 1.0
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
 
@@ -317,11 +317,11 @@ Public Class Funciones
             End Using
             result = Newtonsoft.Json.JsonConvert.DeserializeObject(result)
             token = result
-            'Console.WriteLine(vbCrLf & "¡Mensaje enviado con éxito!")
+            'Console.WriteLine(vbCrLf & "Â¡Mensaje enviado con Ã©xito!")
 
         Catch ex As WebException
 
-            'Console.WriteLine(vbCrLf & "ERROR en la petición:")
+            'Console.WriteLine(vbCrLf & "ERROR en la peticiÃ³n:")
             If ex.Response IsNot Nothing Then
                 Using reader As New StreamReader(ex.Response.GetResponseStream())
                     'Console.WriteLine(reader.ReadToEnd())
@@ -347,7 +347,7 @@ Public Class Funciones
         Dim result As String = ""
         Dim url As String = ""
 
-        ' ======= CONFIGURACIÓN DE PROTOCOLOS DE SEGURIDAD ========
+        ' ======= CONFIGURACIÃ“N DE PROTOCOLOS DE SEGURIDAD ========
         ' Forzar el uso de TLS 1.2, TLS 1.1 y TLS 1.0
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
 
@@ -375,11 +375,11 @@ Public Class Funciones
 
             result = Newtonsoft.Json.JsonConvert.DeserializeObject(result)
             phonenumberid = result
-            'Console.WriteLine(vbCrLf & "¡Mensaje enviado con éxito!")
+            'Console.WriteLine(vbCrLf & "Â¡Mensaje enviado con Ã©xito!")
 
         Catch ex As WebException
 
-            'Console.WriteLine(vbCrLf & "ERROR en la petición:")
+            'Console.WriteLine(vbCrLf & "ERROR en la peticiÃ³n:")
             If ex.Response IsNot Nothing Then
                 Using reader As New StreamReader(ex.Response.GetResponseStream())
                     'Console.WriteLine(reader.ReadToEnd())
@@ -426,7 +426,7 @@ Public Class Funciones
     ''' </summary>
     ''' <param name="ToNumber">Numero Telefonico del Paciente</param>
     ''' <param name="UserName">Nombre del Paciente</param>
-    ''' <param name="MedicalUnit">Nombre de la Unidad Medica que envía el mensaje</param>
+    ''' <param name="MedicalUnit">Nombre de la Unidad Medica que envÃ­a el mensaje</param>
     ''' <param name="AppointmentDate">Fecha de la Cita en Formato dd/MM/yyyy</param>
     ''' <param name="AppointmentHour">Hora de la Cita en Formato HH:mm</param>
     ''' <param name="DoctorName">Nombre del Medico con el que se agenda la cita.</param>
@@ -485,7 +485,7 @@ Public Class Funciones
             Office = Funciones.limpiarTextoMensajesWA(Office)
             AppointmentIssue = Funciones.limpiarTextoMensajesWA(AppointmentIssue)
 
-            ' ======= CONFIGURACIÓN DE PROTOCOLOS DE SEGURIDAD ========
+            ' ======= CONFIGURACIÃ“N DE PROTOCOLOS DE SEGURIDAD ========
             ' Forzar el uso de TLS 1.2, TLS 1.1 y TLS 1.0
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12
 
@@ -649,6 +649,26 @@ Public Class Funciones
 
     End Function
 
+    ''' <summary>
+    ''' 0.16 o el valor vigente
+    ''' </summary>
+    ''' <returns></returns>
+    ''' <remarks></remarks>
+    Shared Function IvaFactorDesglose() As Double
+
+        Dim tb As DataTable
+        tb = frmInterface.tb_Recordset_MySQL_local("Select iImpuesto from cat_impuestos where " & _
+                                              "iVigente = '1'")
+        Try
+            Return tb.Rows(0).Item(0).ToString
+        Catch ex As Exception
+            Return 0
+        End Try
+
+        Return 0
+
+    End Function
+
     Shared Function TicketEC_Id(ByVal NumTicket As String) As Integer
 
 
@@ -666,13 +686,825 @@ Public Class Funciones
 
     End Function
 
+    Shared Function Get_Descuento_Recibo(ByVal NumTicket As String, Optional Devolucion As Boolean = False, Optional Normal As Boolean = True) As Double
+
+        If Devolucion = True Then
+
+            Dim DesctoSum2 As Double
+            Dim tb_ticketsec2 As DataTable
+            tb_ticketsec2 = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                             "cNumTicketec = '" & NumTicket & "' and iPrecioVenta >= 0 and iCubreSP = 0")
+
+            Try
+                If tb_ticketsec2.Rows(0).Item(0).ToString = Nothing Then
+                    frmInterface.Update_local("tb_ticketsec2", _
+                                         "F2_Descto = 0", _
+                                         "cNumTicketec", NumTicket)
+                    Return 0
+                End If
+                DesctoSum2 = CDbl(tb_ticketsec2.Rows(0).Item(0).ToString)
+            Catch ex As Exception
+                DesctoSum2 = 0
+            End Try
+
+            If DesctoSum2 > 0 Then
+                DesctoSum2 = Funciones.Numero_Redondear(DesctoSum2, 2)
+                frmInterface.Update_local("tb_ticketsec2", _
+                                     "F2_Descto = '" & DesctoSum2 & "'", _
+                                     "cNumTicketec", NumTicket)
+            Else
+                frmInterface.Update_local("tb_ticketsec2", _
+                                     "F2_Descto = 0", _
+                                     "cNumTicketec", NumTicket)
+            End If
+
+
+            '**Verifica si es estado de cuenta******************************************************
+            Dim txtvalidaEc As New TextBox
+            txtvalidaEc.Text = NumTicket
+            'EC-HND-0000002
+            txtvalidaEc.Select(0, 2)
+            If txtvalidaEc.SelectedText = "EC" Then
+                GoTo retornaECDev
+            End If
+            '***************************************************************************************
+
+
+            '**Rutina de Productos Con IVA Devolucion **********************************************************************************************************************************
+
+            Dim tb_aux_IVA As DataTable
+            Dim tb_desctoIVA As DataTable
+            tb_desctoIVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                            "cNumTicketec = '" & NumTicket & "' and iPrecioVenta > 0 and cExentoIVa = 'I' and iCubreSP = 0")
+            Dim DesctoSum2_IVA As Double
+            Try
+                DesctoSum2_IVA = tb_desctoIVA.Rows(0).Item(0).ToString
+            Catch ex As Exception
+                DesctoSum2_IVA = 0
+            End Try
+
+            If DesctoSum2_IVA <> 0 Then
+
+                tb_aux_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT icveticketecdetalle, iPrecioVenta FROM tb_ticketsec_detalle where " & _
+                                                              "cNumTicketec = '" & NumTicket & "' and iPrecioVenta < 0 and cExentoIVa = 'I' and iCubreSP = 0 order by iPrecioVenta")
+
+                '**Se asigna el valor de inicio del total que se debe descontar.***********
+                Dim Descuento_Total_IVA As Double = 0
+                Descuento_Total_IVA = Math.Abs(DesctoSum2_IVA)
+                Descuento_Total_IVA = Funciones.Numero_Redondear(Descuento_Total_IVA, 6)
+                '**************************************************************************
+
+                '**Si existen datos se inicia la rutina de asignaciï¿½n de descuentos.*******
+                If tb_aux_IVA.Rows.Count > 0 Then
+
+                    For i As Integer = 0 To tb_aux_IVA.Rows.Count - 1
+
+                        Dim Importe_Venta As Double
+                        Dim Traslado_Base As Double
+                        Dim Traslado_Importe As Double
+                        Dim Diferencia As Double
+                        Dim Descuento As Double
+
+                        Importe_Venta = CDbl(tb_aux_IVA.Rows(i).Item(1).ToString)
+                        Importe_Venta = Math.Round(Importe_Venta, 6)
+                        Diferencia = Importe_Venta - Descuento_Total_IVA
+                        Diferencia = Math.Round(Diferencia, 6)
+                        'CASO 1: 100 - 1000 = -900, 
+                        'CASO 2: 100 - 100 = 0
+                        'CASO 3: 100 - 30 = 70
+                        If Diferencia < 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = Importe_Venta
+                        ElseIf Diferencia = 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = 0
+                        ElseIf Diferencia > 0 Then
+                            Traslado_Base = Diferencia
+                            Traslado_Base = Math.Round(Traslado_Base, 6)
+                            Traslado_Importe = Traslado_Base * IvaFactorDesglose
+                            Traslado_Importe = Math.Round(Traslado_Importe, 6)
+                            Descuento = Descuento_Total_IVA
+                        End If
+
+                        Descuento = Math.Round(Descuento, 2)
+                        Dim Descuento_str As String
+                        Descuento_str = Format(Descuento, "0.00")
+
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "Traslado_Base = '" & Traslado_Base & "', " & _
+                                             "Traslado_Importe = '" & Traslado_Importe & "', " & _
+                                             "iDescuento = '" & Descuento_str & "'", _
+                                             "icveticketecdetalle", tb_aux_IVA.Rows(i).Item(0).ToString)
+                        Descuento_Total_IVA = Math.Round(Descuento_Total_IVA, 2)
+                        Descuento_Total_IVA = Descuento_Total_IVA - Descuento
+
+                    Next
+
+                End If
+
+            End If
+
+
+            '**Rutina de Porductos Sin IVA Devolucion****************************************************************************************************************************
+
+            Dim tb_aux_SINIVA As DataTable
+            Dim tb_desctoSINIVA As DataTable
+            tb_desctoSINIVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                            "cNumTicketec = '" & NumTicket & "' and iPrecioVenta > 0 and cExentoIVa = 'X' and iCubreSP = 0")
+            Dim DesctoSum2_SINIVA As Double
+            Try
+                DesctoSum2_SINIVA = tb_desctoSINIVA.Rows(0).Item(0).ToString
+            Catch ex As Exception
+                DesctoSum2_SINIVA = 0
+            End Try
+
+            If DesctoSum2_SINIVA <> 0 Then
+
+                tb_aux_SINIVA = frmInterface.tb_Recordset_MySQL_local("SELECT icveticketecdetalle, iPrecioVenta FROM tb_ticketsec_detalle where " & _
+                                                                          "cNumTicketec = '" & NumTicket & "' and iPrecioVenta < 0 and cExentoIVa = 'X' and iCubreSP = 0 order by iPrecioVenta")
+
+                '**Se asigna el valor de inicio del total que se debe descontar.***********
+                Dim Descuento_Total_SINIVA As Double = 0
+                Descuento_Total_SINIVA = Math.Abs(DesctoSum2_SINIVA)
+                Descuento_Total_SINIVA = Funciones.Numero_Redondear(Descuento_Total_SINIVA, 6)
+                '**************************************************************************
+
+                '**Si existen datos se inicia la rutina de asignaciï¿½n de descuentos.*******
+                If tb_aux_SINIVA.Rows.Count > 0 Then
+
+                    For i As Integer = 0 To tb_aux_SINIVA.Rows.Count - 1
+
+                        Dim Importe_Venta As Double
+                        Dim Traslado_Base As Double
+                        Dim Traslado_Importe As Double
+                        Dim Diferencia As Double
+                        Dim Descuento As Double
+
+                        Importe_Venta = CDbl(tb_aux_SINIVA.Rows(i).Item(1).ToString)
+                        Importe_Venta = Math.Round(Importe_Venta, 6)
+                        Diferencia = Importe_Venta - Descuento_Total_SINIVA
+                        Diferencia = Math.Round(Diferencia, 6)
+                        'CASO 1: 100 - 1000 = -900, 
+                        'CASO 2: 100 - 100 = 0
+                        'CASO 3: 100 - 30 = 70
+                        If Diferencia < 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = Importe_Venta
+                        ElseIf Diferencia = 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = 0
+                        ElseIf Diferencia > 0 Then
+                            Traslado_Base = Diferencia
+                            Traslado_Base = Math.Round(Traslado_Base, 6)
+                            Traslado_Importe = Traslado_Base * 0 'Administrativa.IvaFactorDesglose
+                            Traslado_Importe = Math.Round(Traslado_Importe, 6)
+                            Descuento = Descuento_Total_SINIVA
+                        End If
+
+                        Descuento = Math.Round(Descuento, 2)
+                        Dim Descuento_str As String
+                        Descuento_str = Format(Descuento, "0.00")
+
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "Traslado_Base = '" & Traslado_Base & "', " & _
+                                             "Traslado_Importe = '" & Traslado_Importe & "', " & _
+                                             "iDescuento = '" & Descuento_str & "'", _
+                                             "icveticketecdetalle", tb_aux_SINIVA.Rows(i).Item(0).ToString)
+                        Descuento_Total_SINIVA = Math.Round(Descuento_Total_SINIVA, 2)
+                        Descuento_Total_SINIVA = Descuento_Total_SINIVA - Descuento
+
+                    Next
+
+                End If
+
+            End If
+
+            '**********************************************************************************************************************
+
+            Dim tb_verif As DataTable
+            tb_verif = frmInterface.tb_Recordset_MySQL_local("Select sum(iDescuento) from tb_ticketsec_detalle2 where cNumTicketec = '" & NumTicket & "'")
+            Dim SumDescDetalle2 As Double
+            SumDescDetalle2 = tb_verif.Rows(0).Item(0).ToString
+
+            If Math.Abs(DesctoSum2) <> Math.Abs(SumDescDetalle2) Then
+
+                '1. get monto diferencia
+                '2. obtener los mosntos de importe dsiponibles en cada partida
+                '3. crear rutina para guardar el monto.
+
+                Dim MontoBase As Double
+                MontoBase = DesctoSum2 + SumDescDetalle2
+
+                Dim tb_aux As DataTable
+                tb_aux = frmInterface.tb_Recordset_MySQL_local("Select " & _
+                                                                "tb_ticketsec_detalle2.icveticketecdetalle, " & _
+                                                                "(tb_ticketsec_detalle.iPrecioVenta - tb_ticketsec_detalle2.iDescuento) AS ImporteDisponible, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Base, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Tasa, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Importe, " & _
+                                                                "tb_ticketsec_detalle2.iDescuento " & _
+                                                                "from tb_ticketsec_detalle2 " & _
+                                                                "INNER JOIN tb_ticketsec_detalle ON (tb_ticketsec_detalle.icveticketecdetalle = tb_ticketsec_detalle2.icveticketecdetalle) " & _
+                                                                "where " & _
+                                                                "tb_ticketsec_detalle2.cNumTicketec = '" & NumTicket & "' and tb_ticketsec_detalle.iCubreSP = 0 and ((tb_ticketsec_detalle2.Traslado_Base - tb_ticketsec_detalle2.iDescuento) > 0) " & _
+                                                                "ORDER BY tb_ticketsec_detalle.iPrecioVenta desc;")
+
+
+                '**Rutina Valor Restante *******************************************************
+
+                Dim DesctoSum2_Calc As Double = 0
+                DesctoSum2_Calc = Math.Abs(MontoBase)
+                DesctoSum2_Calc = Funciones.Numero_Redondear(DesctoSum2_Calc, 6)
+
+                If tb_aux.Rows.Count > 0 Then
+
+                    Dim Rezagado As Double = 0
+                    Dim DestoXPartida_R As Double = 0
+                    Rezagado = MontoBase
+                    For i As Integer = 0 To tb_aux.Rows.Count - 1
+
+                        Dim Base As Double
+                        Base = CDbl(tb_aux.Rows(i).Item(1).ToString) - (Rezagado * -1)
+                        Base = Funciones.Numero_Redondear(Base, 6)
+                        If Base < 0 Then
+                            DestoXPartida_R = (Rezagado * -1) + Base
+                        Else
+                            DestoXPartida_R = Rezagado * -1
+                        End If
+                        Dim iDescuento As Double = 0
+                        iDescuento = DestoXPartida_R + tb_aux.Rows(i).Item(5).ToString
+
+                        iDescuento = Funciones.Numero_Redondear(iDescuento, 2)
+                        Dim DestoXPartida_str As String
+                        DestoXPartida_str = Format(iDescuento, "0.00")
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "iDescuento = '" & DestoXPartida_str & "'", _
+                                             "icveticketecdetalle", tb_aux.Rows(i).Item(0).ToString)
+                        Rezagado = Rezagado + DestoXPartida_R
+
+                    Next
+
+                End If
+
+            End If
+
+retornaECDev:
+
+            Return DesctoSum2
+
+        End If
+
+
+        '**********************************************************************************************************************
+
+
+        Try
+
+
+            Dim DesctoSum2 As Double = 0
+
+            '**Verifica si es estado de cuenta******************************************************
+            Dim txtvalidaEc As New TextBox
+            txtvalidaEc.Text = NumTicket
+            'EC-HND-0000002
+            txtvalidaEc.Select(0, 2)
+            If txtvalidaEc.SelectedText = "EC" Then
+
+                Dim tb_ticketsec_ec As DataTable
+                tb_ticketsec_ec = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                                   "cNumTicketec = '" & NumTicket & "' and iPrecioVenta <= 0 and cExentoIVa = 'I' and iCubreSP = 0")
+
+                Dim tb_ticketsec_ec2 As DataTable
+                tb_ticketsec_ec2 = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                                   "cNumTicketec = '" & NumTicket & "' and iPrecioVenta <= 0 and cExentoIVa = 'X' and iCubreSP = 0")
+
+                Dim DesctoCON_IVA As Double = 0
+                Dim DesctoSIN_IVA As Double = 0
+                Try
+
+                    If tb_ticketsec_ec.Rows(0).Item(0).ToString = Nothing Then
+                        DesctoCON_IVA = 0
+                    Else
+                        DesctoCON_IVA = tb_ticketsec_ec.Rows(0).Item(0).ToString
+                    End If
+                    If tb_ticketsec_ec2.Rows(0).Item(0).ToString = Nothing Then
+                        DesctoSIN_IVA = 0
+                    Else
+                        DesctoSIN_IVA = tb_ticketsec_ec2.Rows(0).Item(0).ToString
+                    End If
+
+                    DesctoSum2 = DesctoSIN_IVA + (DesctoCON_IVA * IvaFactorAumenta())
+                    frmInterface.Update_local("tb_ticketsec2", _
+                                          "F2_Descto = '" & DesctoSum2 & "'", _
+                                          "cNumTicketec", NumTicket)
+                    GoTo retornaEC
+
+                Catch ex As Exception
+                    DesctoSum2 = 0
+                    frmInterface.Update_local("tb_ticketsec2", _
+                                         "F2_Descto = 0", _
+                                         "cNumTicketec", NumTicket)
+                End Try
+
+                GoTo retornaEC
+
+            End If
+            '***************************************************************************************
+
+
+
+
+            Dim tb_ticketsec2 As DataTable
+            tb_ticketsec2 = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                             "cNumTicketec = '" & NumTicket & "' and iPrecioVenta <= 0 and iCubreSP = 0")
+
+            Try
+                If tb_ticketsec2.Rows(0).Item(0).ToString = Nothing Then
+                    frmInterface.Update_local("tb_ticketsec2", _
+                                         "F2_Descto = 0", _
+                                         "cNumTicketec", NumTicket)
+                    Return 0
+                End If
+                DesctoSum2 = CDbl(tb_ticketsec2.Rows(0).Item(0).ToString)
+            Catch ex As Exception
+                DesctoSum2 = 0
+                frmInterface.Update_local("tb_ticketsec2", _
+                                     "F2_Descto = 0", _
+                                     "cNumTicketec", NumTicket)
+            End Try
+
+            If DesctoSum2 < 0 Then
+                DesctoSum2 = Funciones.Numero_Redondear(DesctoSum2, 2)
+                frmInterface.Update_local("tb_ticketsec2", _
+                                     "F2_Descto = '" & DesctoSum2 & "'", _
+                                     "cNumTicketec", NumTicket)
+            End If
+
+            '**Verifica si es estado de cuenta******************************************************
+
+            'SE MOVIï¿½ DE LUGAR ARRIBA
+
+            '**********************************************
+
+
+            '**Rutina de Productos Con IVA = TRUE **********************************************************************************************************************************
+
+            Dim tb_aux_IVA As DataTable
+            Dim tb_desctoIVA As DataTable
+            tb_desctoIVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                            "cNumTicketec = '" & NumTicket & "' and iPrecioVenta < 0 and cExentoIVa = 'I' and iCubreSP = 0")
+            Dim DesctoSum2_IVA As Double
+            Try
+                DesctoSum2_IVA = tb_desctoIVA.Rows(0).Item(0).ToString
+            Catch ex As Exception
+                DesctoSum2_IVA = 0
+            End Try
+
+            If DesctoSum2_IVA <> 0 Then
+
+                tb_aux_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT icveticketecdetalle, iPrecioVenta FROM tb_ticketsec_detalle where " & _
+                                                              "cNumTicketec = '" & NumTicket & "' and iPrecioVenta > 0 and cExentoIVa = 'I' order by iPrecioVenta desc")
+
+                '**Se asigna el valor de inicio del total que se debe descontar.***********
+                Dim Descuento_Total_IVA As Double = 0
+                Descuento_Total_IVA = Math.Abs(DesctoSum2_IVA)
+                Descuento_Total_IVA = Funciones.Numero_Redondear(Descuento_Total_IVA, 6)
+                '**************************************************************************
+
+                '**Si existen datos se inicia la rutina de asignaciï¿½n de descuentos.*******
+                If tb_aux_IVA.Rows.Count > 0 Then
+
+                    For i As Integer = 0 To tb_aux_IVA.Rows.Count - 1
+
+                        Dim Importe_Venta As Double
+                        Dim Traslado_Base As Double
+                        Dim Traslado_Importe As Double
+                        Dim Diferencia As Double
+                        Dim Descuento As Double
+
+                        Importe_Venta = CDbl(tb_aux_IVA.Rows(i).Item(1).ToString)
+                        Importe_Venta = Math.Round(Importe_Venta, 6)
+                        Diferencia = Importe_Venta - Descuento_Total_IVA
+                        Diferencia = Math.Round(Diferencia, 6)
+                        'CASO 1: 100 - 1000 = -900, 
+                        'CASO 2: 100 - 100 = 0
+                        'CASO 3: 100 - 30 = 70
+                        If Diferencia < 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = Importe_Venta
+                        ElseIf Diferencia = 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = 0
+                        ElseIf Diferencia > 0 Then
+                            Traslado_Base = Diferencia
+                            Traslado_Base = Math.Round(Traslado_Base, 6)
+                            Traslado_Importe = Traslado_Base * IvaFactorDesglose()
+                            Traslado_Importe = Math.Round(Traslado_Importe, 6)
+                            Descuento = Descuento_Total_IVA
+                        End If
+
+                        Descuento = Math.Round(Descuento, 2)
+                        Dim Descuento_str As String
+                        Descuento_str = Format(Descuento, "0.00")
+
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "Traslado_Base = '" & Traslado_Base & "', " & _
+                                             "Traslado_Importe = '" & Traslado_Importe & "', " & _
+                                             "iDescuento = '" & Descuento_str & "'", _
+                                             "icveticketecdetalle", tb_aux_IVA.Rows(i).Item(0).ToString)
+                        Descuento_Total_IVA = Math.Round(Descuento_Total_IVA, 2)
+                        Descuento_Total_IVA = Descuento_Total_IVA - Descuento
+
+                    Next
+
+                End If
+
+            End If
+
+
+            '**Rutina de Porductos Sin IVA****************************************************************************************************************************
+
+            Dim tb_aux_SINIVA As DataTable
+            Dim tb_desctoSINIVA As DataTable
+            tb_desctoSINIVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                            "cNumTicketec = '" & NumTicket & "' and iPrecioVenta < 0 and cExentoIVa = 'X' and iCubreSP = 0")
+            Dim DesctoSum2_SINIVA As Double
+            Try
+                DesctoSum2_SINIVA = tb_desctoSINIVA.Rows(0).Item(0).ToString
+            Catch ex As Exception
+                DesctoSum2_SINIVA = 0
+            End Try
+
+            If DesctoSum2_SINIVA <> 0 Then
+
+                tb_aux_SINIVA = frmInterface.tb_Recordset_MySQL_local("SELECT icveticketecdetalle, iPrecioVenta FROM tb_ticketsec_detalle where " & _
+                                                                          "cNumTicketec = '" & NumTicket & "' and iPrecioVenta > 0 and cExentoIVa = 'X' and iCubreSP = 0 order by iPrecioVenta desc")
+
+                '**Se asigna el valor de inicio del total que se debe descontar.***********
+                Dim Descuento_Total_SINIVA As Double = 0
+                Descuento_Total_SINIVA = Math.Abs(DesctoSum2_SINIVA)
+                Descuento_Total_SINIVA = Funciones.Numero_Redondear(Descuento_Total_SINIVA, 6)
+                '**************************************************************************
+
+                '**Si existen datos se inicia la rutina de asignaciï¿½n de descuentos.*******
+                If tb_aux_SINIVA.Rows.Count > 0 Then
+
+                    For i As Integer = 0 To tb_aux_SINIVA.Rows.Count - 1
+
+                        Dim Importe_Venta As Double
+                        Dim Traslado_Base As Double
+                        Dim Traslado_Importe As Double
+                        Dim Diferencia As Double
+                        Dim Descuento As Double
+
+                        Importe_Venta = CDbl(tb_aux_SINIVA.Rows(i).Item(1).ToString)
+                        Importe_Venta = Math.Round(Importe_Venta, 6)
+                        Diferencia = Importe_Venta - Descuento_Total_SINIVA
+                        Diferencia = Math.Round(Diferencia, 6)
+                        'CASO 1: 100 - 1000 = -900, 
+                        'CASO 2: 100 - 100 = 0
+                        'CASO 3: 100 - 30 = 70
+                        If Diferencia < 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = Importe_Venta
+                        ElseIf Diferencia = 0 Then
+                            Traslado_Base = 0.000001
+                            Traslado_Importe = 0
+                            Descuento = 0
+                        ElseIf Diferencia > 0 Then
+                            Traslado_Base = Diferencia
+                            Traslado_Base = Math.Round(Traslado_Base, 6)
+                            Traslado_Importe = Traslado_Base * 0 'Administrativa.IvaFactorDesglose
+                            Traslado_Importe = Math.Round(Traslado_Importe, 6)
+                            Descuento = Descuento_Total_SINIVA
+                        End If
+
+                        Descuento = Math.Round(Descuento, 2)
+                        Dim Descuento_str As String
+                        Descuento_str = Format(Descuento, "0.00")
+
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "Traslado_Base = '" & Traslado_Base & "', " & _
+                                             "Traslado_Importe = '" & Traslado_Importe & "', " & _
+                                             "iDescuento = '" & Descuento_str & "'", _
+                                             "icveticketecdetalle", tb_aux_SINIVA.Rows(i).Item(0).ToString)
+                        Descuento_Total_SINIVA = Math.Round(Descuento_Total_SINIVA, 2)
+                        Descuento_Total_SINIVA = Descuento_Total_SINIVA - Descuento
+
+                    Next
+
+                End If
+
+            End If
+
+
+            '**********************************************************************************************************************
+
+            Dim tb_verif As DataTable
+            tb_verif = frmInterface.tb_Recordset_MySQL_local("Select sum(iDescuento) from tb_ticketsec_detalle2 where cNumTicketec = '" & NumTicket & "'")
+            Dim SumDescDetalle2 As Double
+            SumDescDetalle2 = tb_verif.Rows(0).Item(0).ToString
+            SumDescDetalle2 = Math.Abs(SumDescDetalle2)
+
+            If Math.Abs(DesctoSum2) <> Math.Abs(SumDescDetalle2) Then
+
+                '1. get monto diferencia
+                '2. obtener los mosntos de importe dsiponibles en cada partida
+                '3. crear rutina para guardar el monto.
+
+                Dim MontoBase As Double
+                MontoBase = DesctoSum2 + SumDescDetalle2
+
+                Dim tb_aux As DataTable
+                tb_aux = frmInterface.tb_Recordset_MySQL_local("Select " & _
+                                                                "tb_ticketsec_detalle2.icveticketecdetalle, " & _
+                                                                "(tb_ticketsec_detalle.iPrecioVenta - tb_ticketsec_detalle2.iDescuento) AS ImporteDisponible, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Base, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Tasa, " & _
+                                                                "tb_ticketsec_detalle2.Traslado_Importe, " & _
+                                                                "tb_ticketsec_detalle2.iDescuento " & _
+                                                                "from tb_ticketsec_detalle2 " & _
+                                                                "INNER JOIN tb_ticketsec_detalle ON (tb_ticketsec_detalle.icveticketecdetalle = tb_ticketsec_detalle2.icveticketecdetalle) " & _
+                                                                "where " & _
+                                                                "tb_ticketsec_detalle2.cNumTicketec = '" & NumTicket & "' and tb_ticketsec_detalle.iCubreSP = 0 and ((tb_ticketsec_detalle2.Traslado_Base - tb_ticketsec_detalle2.iDescuento) > 0) " & _
+                                                                "ORDER BY tb_ticketsec_detalle.iPrecioVenta desc;")
+
+
+                '**Rutina Valor Restante *******************************************************
+
+                Dim DesctoSum2_Calc As Double = 0
+                DesctoSum2_Calc = MontoBase * -1
+                DesctoSum2_Calc = Funciones.Numero_Redondear(DesctoSum2_Calc, 6)
+
+                If tb_aux.Rows.Count > 0 Then
+
+                    Dim Rezagado As Double = 0
+                    Dim DestoXPartida_R As Double = 0
+                    Rezagado = MontoBase
+                    For i As Integer = 0 To tb_aux.Rows.Count - 1
+
+                        Dim Base As Double
+                        Base = CDbl(tb_aux.Rows(i).Item(1).ToString) - (Rezagado * -1)
+                        Base = Funciones.Numero_Redondear(Base, 6)
+                        If Base < 0 Then
+                            DestoXPartida_R = (Rezagado * -1) + Base
+                        Else
+                            DestoXPartida_R = Rezagado * -1
+                        End If
+                        Dim iDescuento As Double = 0
+                        iDescuento = DestoXPartida_R + tb_aux.Rows(i).Item(5).ToString
+
+                        iDescuento = Funciones.Numero_Redondear(iDescuento, 2)
+                        Dim DestoXPartida_str As String
+                        DestoXPartida_str = Format(iDescuento, "0.00")
+                        frmInterface.Update_local("tb_ticketsec_detalle2", _
+                                             "iDescuento = '" & DestoXPartida_str & "'", _
+                                             "icveticketecdetalle", tb_aux.Rows(i).Item(0).ToString)
+                        Rezagado = Rezagado + DestoXPartida_R
+
+                    Next
+
+                End If
+
+
+            End If
+
+            '**********************************************************************************************************************
+
+retornaEC:
+
+            Return DesctoSum2
+
+        Catch ex As Exception
+            Return 0
+        End Try
+
+    End Function
+
+    Shared Function Get_IVA_Recibo(ByVal NumTicket As String, Optional Devolucion As Boolean = False) As Double
+
+
+        '******************************************************************************************************
+
+        If Devolucion = True Then
+
+            Dim tb_IVA As DataTable
+            Dim IVASum As Double
+            Dim IVASumMayorCero As Double = 0
+            Dim IVASumMenorCero As Double = 0
+
+            tb_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(round(iPrecioVenta, 6)) as S FROM tb_ticketsec_detalle where " & _
+                                                              "cNumTicketec = '" & NumTicket & "' and " & _
+                                                              "cExentoIVa = 'I' and iPrecioVenta < 0 and iCubreSP = 0")
+
+            If tb_IVA.Rows.Count > 0 Then
+                Try
+                    IVASumMenorCero = CDbl(tb_IVA.Rows(0).Item(0).ToString)
+                    IVASumMenorCero = IVASumMenorCero * IvaFactorDesglose()
+                    IVASumMenorCero = Math.Round(IVASumMenorCero, 6)
+                Catch ex As Exception
+                    IVASumMenorCero = 0
+                End Try
+            End If
+
+            tb_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(round(iPrecioVenta, 6)) as S FROM tb_ticketsec_detalle where " & _
+                                                             "cNumTicketec = '" & NumTicket & "' and " & _
+                                                             "cExentoIVa = 'I'  and iPrecioVenta > 0 and iCubreSP = 0")
+            If tb_IVA.Rows.Count > 0 Then
+                Try
+                    IVASumMayorCero = CDbl(tb_IVA.Rows(0).Item(0).ToString)
+                    IVASumMayorCero = IVASumMayorCero * IvaFactorDesglose()
+                    IVASumMayorCero = Math.Round(IVASumMayorCero, 6)
+                Catch ex As Exception
+                    IVASumMayorCero = 0
+                End Try
+            End If
+
+            Try
+                IVASum = IVASumMenorCero + IVASumMayorCero
+            Catch ex As Exception
+                IVASum = 0
+            End Try
+
+            Try
+                Return IVASum
+            Catch ex As Exception
+                Return 0
+            End Try
+
+        Else
+
+            Dim tb_IVA As DataTable
+            Dim IVASum As Double
+            Dim IVASumMayorCero As Double = 0
+            Dim IVASumMenorCero As Double = 0
+
+            tb_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(round(iPrecioVenta, 6)) as S FROM tb_ticketsec_detalle where " & _
+                                                              "cNumTicketec = '" & NumTicket & "' and " & _
+                                                              "cExentoIVa = 'I' and iPrecioVenta > 0 and iCubreSP = 0")
+
+            If tb_IVA.Rows.Count > 0 Then
+                Try
+                    IVASumMayorCero = CDbl(tb_IVA.Rows(0).Item(0).ToString)
+                    IVASumMayorCero = IVASumMayorCero * IvaFactorDesglose()
+                    IVASumMayorCero = Math.Round(IVASumMayorCero, 6)
+                Catch ex As Exception
+                    IVASumMayorCero = 0
+                End Try
+            End If
+
+
+            ''**Verifica si es estado de cuenta******************************************************
+            Dim txtvalidaEc As New TextBox
+            txtvalidaEc.Text = NumTicket
+            'EC-HND-0000002
+            txtvalidaEc.Select(0, 2)
+            If txtvalidaEc.SelectedText = "EC" Then
+                Return IVASumMayorCero
+            End If
+            ''***************************************************************************************
+
+            tb_IVA = frmInterface.tb_Recordset_MySQL_local("SELECT sum(round(iPrecioVenta, 6)) as S FROM tb_ticketsec_detalle where " & _
+                                                         "cNumTicketec = '" & NumTicket & "' and " & _
+                                                         "cExentoIVa = 'I'  and iPrecioVenta < 0 and iCubreSP = 0")
+            If tb_IVA.Rows.Count > 0 Then
+                Try
+                    IVASumMenorCero = CDbl(tb_IVA.Rows(0).Item(0).ToString)
+                    IVASumMenorCero = IVASumMenorCero * IvaFactorDesglose()
+                    IVASumMenorCero = Math.Round(IVASumMenorCero, 6)
+                Catch ex As Exception
+                    IVASumMenorCero = 0
+                End Try
+            End If
+
+            Try
+                IVASum = IVASumMayorCero + IVASumMenorCero
+            Catch ex As Exception
+                IVASum = 0
+            End Try
+
+            Try
+                Return IVASum
+            Catch ex As Exception
+                Return 0
+            End Try
+
+        End If
+
+    End Function
+
+    Shared Function Get_Subtotal_Recibo(ByVal NumTicket As String, Optional Devolucion As Boolean = False) As Double
+
+        Dim SubtotalSum2 As Double
+        Dim tb_ticketsec2 As DataTable
+
+        If Devolucion = True Then
+
+            tb_ticketsec2 = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                              "cNumTicketec = '" & NumTicket & "' and iPrecioVenta <= 0 and iCubreSP = 0")
+            Try
+                SubtotalSum2 = CDbl(tb_ticketsec2.Rows(0).Item(0).ToString)
+            Catch ex As Exception
+                SubtotalSum2 = 0
+            End Try
+
+            frmInterface.Update_local("tb_ticketsec2", _
+                                 "F2_Subtotal = '" & SubtotalSum2 & "'", _
+                                 "cNumTicketec", NumTicket)
+            Return SubtotalSum2
+        Else
+
+            tb_ticketsec2 = frmInterface.tb_Recordset_MySQL_local("SELECT sum(iPrecioVenta) as S FROM tb_ticketsec_detalle where " & _
+                                                             "cNumTicketec = '" & NumTicket & "' and iPrecioVenta >= 0 and iCubreSP = 0")
+            Try
+                SubtotalSum2 = CDbl(tb_ticketsec2.Rows(0).Item(0).ToString)
+            Catch ex As Exception
+                SubtotalSum2 = 0
+            End Try
+
+            frmInterface.Update_local("tb_ticketsec2", _
+                                 "F2_Subtotal = '" & SubtotalSum2 & "'", _
+                                 "cNumTicketec", NumTicket)
+
+            Return SubtotalSum2
+
+        End If
+
+    End Function
+
+    ''' <summary>
+    ''' Obtenemos el cï¿½lculo del valor total del recibo de pago.
+    ''' </summary>
+    ''' <param name="NumTicket"></param>
+    ''' <param name="Devolucion">Debe enviarse el dato en valor negativo</param>
+    ''' <returns></returns>
+    ''' <remarks></remarks>
+    Shared Function Get_Total_Recibo(ByVal NumTicket As String, Optional Devolucion As Boolean = False) As Double
+
+        Try
+
+            Dim TotalSum As Double
+
+            Dim Subtotal As Double = Get_Subtotal_Recibo(NumTicket, Devolucion)
+            Subtotal = Funciones.Numero_Redondear(Subtotal, 2)
+
+            Dim Descuento As Double = Get_Descuento_Recibo(NumTicket, Devolucion)
+            Descuento = Funciones.Numero_Redondear(Descuento, 2)
+
+            Dim IVA As Double = Get_IVA_Recibo(NumTicket, Devolucion)
+            IVA = Funciones.Numero_Redondear(IVA, 2)
+
+            TotalSum = Subtotal + Descuento + IVA
+
+            Return TotalSum
+
+        Catch ex As Exception
+            Return 0
+        End Try
+
+    End Function
+
+    Shared Sub RecalcularTotales(NumTicketSel As String, Optional desglosar_detalle As Boolean = True)
+
+        Dim Subtotal_Act As Double
+        Dim IVA_Act As Double
+        Dim Total_Act As Double
+        Dim Descuento_Act As Double = 0
+        Dim NumeroLetras_Act As String
+
+        Subtotal_Act = Get_Subtotal_Recibo(NumTicketSel)
+        IVA_Act = Get_IVA_Recibo(NumTicketSel)
+        Descuento_Act = Get_Descuento_Recibo(NumTicketSel)
+        Total_Act = Get_Total_Recibo(NumTicketSel)
+
+        NumeroLetras_Act = ""
+
+        If frmInterface.Update_local("tb_ticketsec", _
+                                     "iSubTotal='" & Funciones.Numero_Redondear(Subtotal_Act, 2) & "', " & _
+                                     "iIVA='" & Funciones.Numero_Redondear(IVA_Act, 2) & "', " & _
+                                     "iCreditoDevolucion='" & Funciones.Numero_Redondear(Descuento_Act, 2) & "', " & _
+                                     "iTotal='" & Funciones.Numero_Redondear(Total_Act, 2) & "', " & _
+                                     "cTotalLetra='" & NumeroLetras_Act & "'", _
+                                     "cNumTicketEC", NumTicketSel) Then
+
+        End If
+
+    End Sub
+
 #End Region
 
 #Region "Paquetes"
 
 
     ''' <summary>
-    ''' > 0 indica que el paciente cuenta con un paquete activo registrado en el ingreso de admisión hospitalaria. = 0 indica que no cuenta con paquete activo.
+    ''' > 0 indica que el paciente cuenta con un paquete activo registrado en el ingreso de admisiÃ³n hospitalaria. = 0 indica que no cuenta con paquete activo.
     ''' </summary>
     ''' <param name="CvePaciente"></param>
     ''' <returns></returns>
@@ -1062,7 +1894,7 @@ valida_cantidad_2:
 
             'Funciones.Msj_AdvOnly("A V I S O   D E   P R O D U C T O   O   C A N T I D A D   F U E R A   D E   P A Q U E T E" & vbCrLf & vbCrLf & _
             '                      "Producto: " & vbCrLf & Descripcion & vbCrLf & vbCrLf & _
-            '                      "Debe informar a recepcion que la cantidad o producto no está cubierto para este PAQUETE")
+            '                      "Debe informar a recepcion que la cantidad o producto no estÃ¡ cubierto para este PAQUETE")
 
         Catch ex As Exception
         End Try
@@ -1094,7 +1926,7 @@ valida_cantidad_2:
     End Function
 
     ''' <summary>
-    ''' Devuelve el nombre del servicio activo del paciente, sin importar cómo se haya logueado el usuario.
+    ''' Devuelve el nombre del servicio activo del paciente, sin importar cÃ³mo se haya logueado el usuario.
     ''' </summary>
     ''' <param name="ClavePaciente"></param>
     ''' <returns></returns>
@@ -1326,7 +2158,7 @@ valida_cantidad_2:
 #Region "Otras Funciones"
 
     ''' <summary>
-    ''' Configuarciones Varioas de Operación. Devielve el valor configurado en Datos de Unidad
+    ''' Configuarciones Varioas de OperaciÃ³n. Devielve el valor configurado en Datos de Unidad
     ''' </summary>
     ''' <param name="concepto"></param>
     ''' <returns></returns>
@@ -1495,7 +2327,7 @@ Public Class FacturacionEnviarOrdenInternamiento
         End If
 
         If pty_email = "" Then
-            'Funciones.Msj_Err("Debe indicar la dirección de correo electrónico")
+            'Funciones.Msj_Err("Debe indicar la direcciÃ³n de correo electrÃ³nico")
             'pty_valido = False
             Return False
         End If
@@ -1517,7 +2349,7 @@ Public Class FacturacionEnviarOrdenInternamiento
     Shared Function ValidaDatosCorreo() As Boolean
 
         If pty_asunto = "" Then
-            'If Funciones.Msj_Adv("No se ha especificado en el correo el asunto,  ¿Deseas continuar y enviarlo de todos modos?") = False Then
+            'If Funciones.Msj_Adv("No se ha especificado en el correo el asunto,  Â¿Deseas continuar y enviarlo de todos modos?") = False Then
             '    pty_valido = False
             '    Return False
             'End If
@@ -1525,7 +2357,7 @@ Public Class FacturacionEnviarOrdenInternamiento
         End If
 
         If pty_mensaje = "" Then
-            'If Funciones.Msj_Adv("No se ha especificado en el correo ningún mensaje,  ¿Deseas continuar y enviarlo de todos modos?") = False Then
+            'If Funciones.Msj_Adv("No se ha especificado en el correo ningÃºn mensaje,  Â¿Deseas continuar y enviarlo de todos modos?") = False Then
             '    pty_valido = False
             '    Return False
             'End If
@@ -1537,7 +2369,7 @@ Public Class FacturacionEnviarOrdenInternamiento
     End Function
 
     ''' <summary>
-    ''' Función para el envío de la orden de internamiento
+    ''' FunciÃ³n para el envÃ­o de la orden de internamiento
     ''' </summary>
     ''' <remarks></remarks>
     Shared Function EnviarOrdenInternamiento(Nom_Destinatario As String, email As String, asunto As String, mensaje As String, IdOrdenInternamiento As Integer, Optional MensajeConfirma As Boolean = False) As Boolean
@@ -1575,7 +2407,7 @@ Public Class FacturacionEnviarOrdenInternamiento
                                          "ccveusuarioenviocorreo = 'histomedic_portal'", _
                                          "Id", pty_IdOrdenInternamiento) Then
 
-                'Funciones.Msj_Info("Información Actualizada Exitosamente")
+                'Funciones.Msj_Info("InformaciÃ³n Actualizada Exitosamente")
             Else
                 'Funciones.Msj_Err("Error al Guardar, Consulte al Adminstrador")
                 Return False
@@ -1593,7 +2425,7 @@ Public Class FacturacionEnviarOrdenInternamiento
 
     ''' <summary>
     ''' Genera la carpeta HistoMedic en los archivos temporales para guardar ahi el xml y pdf temporales
-    ''' Retorna la ruta completa de onde se alojarán los arhcivos temporales
+    ''' Retorna la ruta completa de onde se alojarÃ¡n los arhcivos temporales
     ''' </summary>
     ''' <remarks></remarks>
     Shared Function Get_RutaTemporal() As String
@@ -1628,10 +2460,10 @@ Public Class FacturacionEnviarOrdenInternamiento
     End Function
 
     ''' <summary>
-    ''' Crea y envia el correo electronico. Retorna true si el correo se creó y fue enviado correctamente.
+    ''' Crea y envia el correo electronico. Retorna true si el correo se creÃ³ y fue enviado correctamente.
     ''' </summary>
     ''' <param name="nombreDest">Nombre del detinatario</param>
-    ''' <param name="direcEmail">Dirección de correo electronico </param>
+    ''' <param name="direcEmail">DirecciÃ³n de correo electronico </param>
     ''' <param name="asuntoCorreo">Asunto</param>
     ''' <param name="mensajeCorreo">Mensaje</param>
     ''' <remarks></remarks>
@@ -1696,11 +2528,11 @@ Public Class FacturacionEnviarOrdenInternamiento
         success = mailman.SendEmail(email)
         If success Then
             'If MensajeConfirma Then
-            '    Funciones.Msj_Info("Correo electrónico enviado exitosamente")
+            '    Funciones.Msj_Info("Correo electrÃ³nico enviado exitosamente")
             'End If
         Else
             'Funciones.Msj_Err("Error al enviar el correo de AVISO DE ORDEN DE INTERNAMIENTO: " & mailman.LastErrorText & vbCrLf & _
-            '                  "¡¡¡IMPORTANTE!!!: " & vbCrLf & _
+            '                  "Â¡Â¡Â¡IMPORTANTE!!!: " & vbCrLf & _
             '                  "1) Intente Guardar Nuevamente." & _
             '                  "2) En caso de persistir el error, Debe imprimir la Orden de Internamiento y Enviarla por otro medio al paciente y al medico tratante.")
             Return False
@@ -1713,7 +2545,7 @@ Public Class FacturacionEnviarOrdenInternamiento
         '  for the example:
         success = mailman.CloseSmtpConnection()
         If (success <> True) Then
-            'Funciones.Msj_Err("Conexión del servidor SMTP no fue cerrada adecuadamente")
+            'Funciones.Msj_Err("ConexiÃ³n del servidor SMTP no fue cerrada adecuadamente")
         End If
 
         Return True
@@ -1730,7 +2562,7 @@ Public Class FacturacionEnviarOrdenInternamiento
 
         Try
 
-            '-Codificación Previa --------------------------------------------------
+            '-CodificaciÃ³n Previa --------------------------------------------------
 
 
             '-Asignacion de Variables --------------------------------------------------
@@ -1747,7 +2579,7 @@ Public Class FacturacionEnviarOrdenInternamiento
             reporte.RecordSelectionFormula = Filtro
             reporte.Refresh()
 
-            '-Creación de PDF ----------------------------------------------------------
+            '-CreaciÃ³n de PDF ----------------------------------------------------------
             Dim CrExportOptionsReporte As CrystalDecisions.Shared.ExportOptions
             CrExportOptionsReporte = reporte.ExportOptions
             Dim RutaTemp As String = ""
@@ -1765,7 +2597,7 @@ Public Class FacturacionEnviarOrdenInternamiento
             ''-Auditoria de Impresion ----------------------------------------------------------
 
 
-            '-Cerrar Conexión de Reporte a Base de Datos--------------------------------------------------------
+            '-Cerrar ConexiÃ³n de Reporte a Base de Datos--------------------------------------------------------
             reporte.Close()
 
             Return True
@@ -1779,7 +2611,7 @@ Public Class FacturacionEnviarOrdenInternamiento
     End Function
 
     ''' <summary>
-    ''' Valida que la dirección de correo del destinatario sea válida
+    ''' Valida que la direcciÃ³n de correo del destinatario sea vÃ¡lida
     ''' </summary>
     ''' <param name="direccionEmail"></param>
     ''' <returns></returns>
@@ -1796,7 +2628,7 @@ Public Class FacturacionEnviarOrdenInternamiento
             'En caso de que el formato de la cadena sea incorrecto nos produce una exepcion
             'del tipo FormatException, ni necesidad tenemos que escribir el mensaje de error
             'simplemente lo obtenemos de la exepcion
-            ' '' ''Funciones.Msj_Err("Dirección de correo No Valida" + ex.Message)
+            ' '' ''Funciones.Msj_Err("DirecciÃ³n de correo No Valida" + ex.Message)
             Return False
         End Try
 
@@ -1809,7 +2641,7 @@ Public Class FacturacionEnviarOrdenInternamiento
     ''' <summary>
     ''' Devuelve la ruta donde se descarga el archivo de crystal
     ''' </summary>
-    ''' <param name="NombreArchivoReporte">Nombre del Reporte Incluyendo la Extención</param>
+    ''' <param name="NombreArchivoReporte">Nombre del Reporte Incluyendo la ExtenciÃ³n</param>
     ''' <returns></returns>
     ''' <remarks></remarks>
     Shared Function PacienteFTP_Reportes(NombreArchivoReporte As String) As String
@@ -2115,7 +2947,7 @@ Public Class EnviarCorreos
         End If
 
         If pty_email = "" Then
-            'Funciones.Msj_Err("Debe indicar la dirección de correo electrónico")
+            'Funciones.Msj_Err("Debe indicar la direcciÃ³n de correo electrÃ³nico")
             pty_valido = False
             Return False
         End If
@@ -2137,14 +2969,14 @@ Public Class EnviarCorreos
     Shared Function ValidaDatosCorreo() As Boolean
 
         If pty_asunto = "" Then
-            If Funciones.Msj_Adv("No se ha especificado en el correo el asunto,  ¿Deseas continuar y enviarlo de todos modos?") = False Then
+            If Funciones.Msj_Adv("No se ha especificado en el correo el asunto,  Â¿Deseas continuar y enviarlo de todos modos?") = False Then
                 pty_valido = False
                 Return False
             End If
         End If
 
         If pty_mensaje = "" Then
-            If Funciones.Msj_Adv("No se ha especificado en el correo ningún mensaje,  ¿Deseas continuar y enviarlo de todos modos?") = False Then
+            If Funciones.Msj_Adv("No se ha especificado en el correo ningÃºn mensaje,  Â¿Deseas continuar y enviarlo de todos modos?") = False Then
                 pty_valido = False
                 Return False
             End If
@@ -2155,7 +2987,7 @@ Public Class EnviarCorreos
     End Function
 
     ''' <summary>
-    ''' Valida que la dirección de correo del destinatario sea válida
+    ''' Valida que la direcciÃ³n de correo del destinatario sea vÃ¡lida
     ''' </summary>
     ''' <param name="direccionEmail"></param>
     ''' <returns></returns>
@@ -2172,7 +3004,7 @@ Public Class EnviarCorreos
             'En caso de que el formato de la cadena sea incorrecto nos produce una exepcion
             'del tipo FormatException, ni necesidad tenemos que escribir el mensaje de error
             'simplemente lo obtenemos de la exepcion
-            'Funciones.Msj_Err("Dirección de correo " & direccionEmail & " No Valida. Error: " + ex.Message)
+            'Funciones.Msj_Err("DirecciÃ³n de correo " & direccionEmail & " No Valida. Error: " + ex.Message)
             Return False
         End Try
 
@@ -2180,10 +3012,10 @@ Public Class EnviarCorreos
 
 
     ''' <summary>
-    ''' Crea y envia el correo electronico. Retorna true si el correo se creó y fue enviado correctamente.
+    ''' Crea y envia el correo electronico. Retorna true si el correo se creÃ³ y fue enviado correctamente.
     ''' </summary>
     ''' <param name="nombreDest">Nombre del detinatario</param>
-    ''' <param name="direcEmail">Dirección de correo electronico </param>
+    ''' <param name="direcEmail">DirecciÃ³n de correo electronico </param>
     ''' <param name="asuntoCorreo">Asunto</param>
     ''' <param name="mensajeCorreo">Mensaje</param>
     ''' <remarks></remarks>
@@ -2226,7 +3058,7 @@ Public Class EnviarCorreos
         ' Send mail.
         success = mailman.SendEmail(email)
         If success Then
-            'Funciones.Msj_Info("Correo electrónico enviado exitosamente")
+            'Funciones.Msj_Info("Correo electrÃ³nico enviado exitosamente")
         Else
             'Funciones.Msj_Err("Error al enviar el correo: " & mailman.LastErrorText)
             Return False
@@ -2240,7 +3072,7 @@ Public Class EnviarCorreos
         '  for the example:
         success = mailman.CloseSmtpConnection()
         If (success <> True) Then
-            'Funciones.Msj_Err("Conexión del servidor SMTP no fue cerrada adecuadamente")
+            'Funciones.Msj_Err("ConexiÃ³n del servidor SMTP no fue cerrada adecuadamente")
         End If
 
         Return True

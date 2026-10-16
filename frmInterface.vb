@@ -1,4 +1,4 @@
-Imports System.Drawing.Printing
+﻿Imports System.Drawing.Printing
 Imports System.IO
 Imports System.Text
 Imports System.Threading
@@ -277,7 +277,7 @@ Public Class frmInterface
             Try
                 Me.Cargar_Costo_Dias_Cama_Hosp()
             Catch ex As Exception
-                LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
+                LogEventos.Escribir("Cargar_Costo_Dias_Cama_Hosp. " & ex.GetType().Name)
             End Try
 
 
@@ -308,7 +308,7 @@ Public Class frmInterface
 
             ' ======================================
 
-            'Me.ProgressBarX1.Value = 0
+            Me.ProgressBarX1.Value = 0
 
             '== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == == 
             Try
@@ -4644,9 +4644,6 @@ intenta_otravz:
 
             End If
 
-            'If cx_MySQL_Admin.State = ConnectionState.Closed Then
-            'End If
-
         Catch ex As Exception
             LogEventos.Escribir("TimerReconect_Tick. " & ex.Message)
         End Try
@@ -5116,296 +5113,93 @@ no_insertar:
 
 #Region "Cargar Camas"
 
+    Private cargosCamaActivos As Integer = 0
+    Private ReadOnly relojCargosCama As New System.Diagnostics.Stopwatch()
+    Private siguienteRevisionCamas As Long = 300000L
+
+    ''' <summary>
+    ''' Programa los cargos cada cinco minutos sin cambiar el Timer compartido.
+    ''' Usa una copia de la conexión local del Robot para no compartir conexiones activas entre hilos.
+    ''' </summary>
     Private Sub Cargar_Costo_Dias_Cama_Hosp()
-
-        If Funciones.getValorConfiguracion("ACTIVAR_REGISTRO_AUTOMATICO_CAMAS") = 0 Then
-            Exit Sub
+        If Not relojCargosCama.IsRunning Then
+            relojCargosCama.Start()
+            Return
         End If
-
-
-        Dim CveMaterial As String
-        Dim CvePaciente As String
-        Dim NumCuenta As String
-        Dim icveclave As Integer
-        Dim icvecama As Integer
-        Dim CveServicio As String
-
-
-
-
-        Dim tb_rec As Data.DataTable
-        tb_rec = tb_Recordset_MySQL_local("SELECT " & _
-                                       "tb_urg_recepcion.ccvepaciente, " & _
-                                       "tb_urg_recepcion.cdscareaafectada, " & _
-                                       "tb_urg_recepcion.fchrecepcion, " & _
-                                       "tb_urg_recepcion.icvecama, " & _
-                                       "cat_servicios.ccvematerial, " & _
-                                       "tb_urg_recepcion.Id, " & _
-                                       "tb_urg_recepcion.icvecama, " & _
-                                       "tb_urg_recepcion.fchregistro " & _
-                                       "FROM tb_urg_recepcion " & _
-                                       "INNER JOIN cat_servicios ON cat_servicios.cdscservicio = tb_urg_recepcion.cdscareaafectada " & _
-                                       "WHERE " & _
-                                       "(cat_servicios.cdscservicio <> 'QUIROFANO' AND cat_servicios.cdscservicio <> 'UTQ' AND cat_servicios.cdscservicio <> 'RECUPERACION') and " & _
-                                       "(cat_servicios.cdscareaafectada = 'HOSPITALIZACION' OR cat_servicios.cdscareaafectada = 'URGENCIAS') and " & _
-                                       "tb_urg_recepcion.iegresado = 0")
-
-        Me.ProgressBarX1.Minimum = 0
-        Me.ProgressBarX1.Maximum = tb_rec.Rows.Count
-
-        Dim j As Integer
-        For j = 0 To tb_rec.Rows.Count - 1
-
-
-            'Si el servicio es de urgencias, verifica que tenga mas de 8 horas ingresado en el servicio.
-            If tb_rec.Rows(j).Item("cdscareaafectada").ToString = "URGENCIAS" Then
-                Dim HorasIngresado As Integer
-                HorasIngresado = DateDiff(DateInterval.Hour, CDate(tb_rec.Rows(j).Item("fchregistro").ToString), Calcula_FechaActual)
-                If HorasIngresado <= 8 Then
-                    GoTo ff
-                End If
+        If relojCargosCama.ElapsedMilliseconds < siguienteRevisionCamas Then Return
+        If Interlocked.CompareExchange(cargosCamaActivos, 1, 0) <> 0 Then Return
+        siguienteRevisionCamas = relojCargosCama.ElapsedMilliseconds + 300000L
+        Dim conexionCamas As MySqlConnector.MySqlConnection = Nothing
+        Try
+            Dim configuracion As String = Funciones.getValorConfiguracion("ACTIVAR_REGISTRO_AUTOMATICO_CAMAS")
+            If Not String.Equals(configuracion, "1", StringComparison.Ordinal) Then
+                RegistrarLogCamas("Camas: configuración deshabilitada o inválida; ejecución omitida.")
+                Interlocked.Exchange(cargosCamaActivos, 0)
+                Return
             End If
-
-            icvecama = tb_rec.Rows(j).Item("icvecama").ToString
-            CvePaciente = tb_rec.Rows(j).Item("ccvepaciente").ToString
-            CveServicio = tb_rec.Rows(j).Item("cdscareaafectada").ToString
-
-            NumCuenta = Me.NumCuentaPaciente(CvePaciente, icvecama)
-            If NumCuenta = "" Then
-                GoTo ff
-            End If
-
+            ' Reutilizar la configuración actual sin nuevos servidores, credenciales ni referencias externas.
+            conexionCamas = DirectCast(Me.cx_MySQL_local.Clone(), MySqlConnector.MySqlConnection)
+            Dim servicio As New HisCargosHospitalizacionAutomaticos(conexionCamas, Me.CLUES,
+                AddressOf BuscarCuentaCamas, AddressOf ObtenerIngresoCamas, AddressOf RegistrarLogCamas)
+            Dim conexionTrabajo As MySqlConnector.MySqlConnection = conexionCamas
+            Task.Run(Sub()
+                         Try
+                             servicio.Ejecutar()
+                         Catch ex As Exception
+                             RegistrarLogCamas("Camas: ejecución omitida (" & ex.GetType().Name &
+                                               "). Revisar tablas auxiliares, índices y conexión en desarrollo.")
+                         Finally
+                             Try
+                                 conexionTrabajo.Dispose()
+                             Catch ex As Exception
+                                 RegistrarLogCamas("Camas: error al liberar la conexión local (" & ex.GetType().Name & ").")
+                             Finally
+                                 Interlocked.Exchange(cargosCamaActivos, 0)
+                             End Try
+                         End Try
+                     End Sub)
+        Catch ex As Exception
             Try
-
-                Dim tb_cama As DataTable
-                tb_cama = tb_Recordset_MySQL_local("SELECT ccvematerial FROM cat_camas where icvecama = " & icvecama & "")
-                If tb_cama.Rows.Count = 0 Then
-                    GoTo ff
-                End If
-                CveMaterial = tb_cama.Rows(0).Item("ccvematerial").ToString
-                If CveMaterial = "" Then GoTo ff
-            Catch ex As Exception
-                CveMaterial = ""
-                GoTo ff
+                If conexionCamas IsNot Nothing Then conexionCamas.Dispose()
+            Catch exLiberacion As Exception
+                System.Diagnostics.Trace.WriteLine("Camas: no se pudo liberar la conexión local (" & exLiberacion.GetType().Name & ").")
+            Finally
+                Interlocked.Exchange(cargosCamaActivos, 0)
             End Try
+            RegistrarLogCamas("Camas: no se pudo iniciar la ejecución (" & ex.GetType().Name & ").")
+        End Try
+    End Sub
 
-            Dim Descripcion As String = ""
-            Descripcion = MaterialDescripcion(CveMaterial)
+    ''' <summary>Mantiene NumCuentaPaciente intacta y ejecuta su acceso heredado en el hilo del formulario.</summary>
+    Private Function BuscarCuentaCamas(ByVal paciente As String, ByVal cama As Integer) As String
+        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
+        If Me.InvokeRequired Then
+            Return CStr(Me.Invoke(New Func(Of String, Integer, String)(AddressOf BuscarCuentaCamas), paciente, cama))
+        End If
+        Return Me.NumCuentaPaciente(paciente, cama)
+    End Function
 
-            ' ==============================================
-            Dim PrecioVenta As Double = 0
-            Dim cantidad As Double = 1
-            Dim PrecioPublico As Double = 0
+    ''' <summary>Reutiliza Get_FechaHoraIngresoHospitalario sin cambiar su implementación ni sus conexiones globales.</summary>
+    Private Function ObtenerIngresoCamas(ByVal paciente As String, ByVal recepcion As Integer) As DateTime
+        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
+        If Me.InvokeRequired Then
+            Return CDate(Me.Invoke(New Func(Of String, Integer, DateTime)(AddressOf ObtenerIngresoCamas), paciente, recepcion))
+        End If
+        Return Funciones.Get_FechaHoraIngresoHospitalario(paciente, recepcion)
+    End Function
 
-            ' === Determina el importe del Producto ===
-            Dim importe_lista As Double = Funciones.getImporteClasificacionNew(CveMaterial, cantidad, PacienteListaPrecios(CvePaciente))
-            PrecioVenta = importe_lista
-
-            PrecioPublico = Funciones.MaterialPrecioPublicoGeneral(CveMaterial)
-            ' === Determina el importe del Producto Fin ===
-
-
-
-            'valida si ya fue cargado el dia de hsopitalizacion
-            icveclave = Me.Material_icveClaveCobro(CveMaterial)
-            Dim tb_validaDiaHosp As DataTable
-            tb_validaDiaHosp = tb_Recordset_MySQL_local("Select icveticketecdetalle from tb_ticketsec_detalle where " & _
-                                                        "ccvematerial = '" & CveMaterial & "' and " & _
-                                                        "cNumTicketEC = '" & NumCuenta & "' and " & _
-                                                        "fchregistro like '" & Format(Me.Calcula_FechaActual, "yyyy-MM-dd") & "%' and " & _
-                                                        "icveclave='" & icveclave & "'")
-
-
-            If tb_validaDiaHosp.Rows.Count = 0 Then
-
-                ' ===================================================================================================
-                Dim IdDiagnostico_EstadoCuenta As String
-                IdDiagnostico_EstadoCuenta = Get_Dx_NumTicketEstadoCuenta(NumCuenta)
-
-                Dim cveunidad As String
-                cveunidad = Material_CveUnidadMedida(CveMaterial)
-                If cveunidad.Trim = "" Then
-                    cveunidad = "ser"
-                End If
-
-                Dim tbcuenta As DataTable
-                tbcuenta = tb_Recordset_MySQL_local("Select icveticketecdetalle from tb_ticketsec_detalle where " & _
-                                                      "cNumTicketec = '" & NumCuenta & "'")
-
-                If tbcuenta.Rows.Count = 0 Then
-                    Dim tbfecha As DataTable
-                    tbfecha = tb_Recordset_MySQL_local("Select fchTicketec from tb_ticketsec where " & _
-                                                          "cNumTicketec = '" & NumCuenta & "'")
-                    Dim fecha As Date = tbfecha.Rows(0).Item(0).ToString
-                    If DateAdd(DateInterval.Day, 2, fecha) < Calcula_FechaActual() Then
-                        If Update_local("tb_ticketsec", _
-                                           "fchTicketec='" & Format(Calcula_FechaActual(), "yyyy-MM-dd") & "'", _
-                                           "cNumTicketEC", NumCuenta) Then
-                        End If
-                    Else
-                        fecha = tbfecha.Rows(0).Item(0).ToString
-                        If fecha < Calcula_FechaActual() Then
-                            If Update_local("tb_ticketsec", _
-                                            "fchTicketec='" & Format(Calcula_FechaActual(), "yyyy-MM-dd") & "'", _
-                                            "cNumTicketEC", NumCuenta) Then
-                            End If
-                        End If
-                    End If
-
-                Else
-
-                    Dim tbfecha As DataTable
-                    tbfecha = tb_Recordset_MySQL_local("Select fchTicketec from tb_ticketsec where " & _
-                                                          "cNumTicketec = '" & NumCuenta & "'")
-                    Dim fecha As Date = tbfecha.Rows(0).Item(0).ToString
-                    fecha = tbfecha.Rows(0).Item(0).ToString
-                    If fecha > Calcula_FechaActual() Then
-                        If Update_local("tb_ticketsec", _
-                                        "fchTicketec='" & Format(Calcula_FechaActual(), "yyyy-MM-dd") & "'", _
-                                        "cNumTicketEC", NumCuenta) Then
-                        End If
-                    End If
-                End If
-
-                '**Obtenemos el valor del producto aplicando el factor de IVA*********************************************
-                If Funciones.MaterialCausaIVA(CveMaterial) Then
-                    Try
-                        PrecioVenta = Funciones.Numero_Redondear((PrecioVenta / Funciones.IvaFactorAumenta()), 2)
-                    Catch ex As Exception
-                        PrecioVenta = 0
-                        GoTo ff
-                    End Try
-                End If
-                '*************************************************************************************************************
-
-
-                '= Nuevo Esquema de Paquetes. == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === == == === ==
-                '== Paquetes == ==
-                Dim cantidad_div As New Collection
-                Dim notificar_fuera_paquete As Boolean = False
-                Dim idsp As Integer = 0
-                idsp = Funciones.CargarExcepcionesEC_Paquete(NumCuenta, cantidad, CveMaterial, CvePaciente, False, notificar_fuera_paquete, cantidad_div)
-
-                ' iCubreSP
-                '"iCubreSP = '" & idsp & "', " & _
-                '== Paquetes Fin == ==
-
-                If cantidad_div.Count = 0 Then
-
-                    If Insert_local("tb_ticketsec_detalle", _
-                                           "clues = '" & Me.CLUES & "', " & _
-                                            "icveticketec='" & Funciones.TicketEC_Id(NumCuenta) & "', " & _
-                                            "cNumTicketEC='" & NumCuenta & "', " & _
-                                            "iCantidad='" & cantidad & "', " & _
-                                            "cDescripcion='" & Descripcion & "', " & _
-                                            "ccvematerial='" & CveMaterial & "', " & _
-                                            "icveclave='" & icveclave & "', " & _
-                                            "icvecama='" & icvecama & "', " & _
-                                            "cCodigoBarras='" & CveMaterial & "', " & _
-                                            "ccveanterior='" & Material_CveAnterior(CveMaterial) & "', " & _
-                                            "ccveunidad='" & cveunidad & "', " & _
-                                            "iPrecioVenta='" & PrecioVenta & "', " & _
-                                            "iPrecioPublico='" & PrecioPublico & "', " & _
-                                            "iPrecioSujetoCatOficial='" & Material_SujetoCostoOficial(CveMaterial) & "', " & _
-                                            "cExentoIVa='" & Material_ExentoIVA(CveMaterial) & "', " & _
-                                            "cNumLote='', " & _
-                                            "iDescuento='0', " & _
-                                            "cDoctoAbono='', " & _
-                                            "cdscareaafectada = '" & CveServicio & "', " & _
-                                            "icvdiagnostico = '" & IdDiagnostico_EstadoCuenta & "', " & _
-                                            "iCubreSP = '" & idsp & "', " & _
-                                            "ccvematerial_cubresp = '', " & _
-                                            "fchregistro=current_timestamp, " & _
-                                            "motivo_registro_manual='', " & _
-                                            "ccveusuario='servidor_his'") Then
-
-                        If idsp = 0 Then
-                            If PrecioVenta > 0 Then
-                                If notificar_fuera_paquete Then
-                                    Funciones.notificarAlertaProductoCantidadFueraPaquete(CvePaciente, CveMaterial, cantidad, cveunidad, Descripcion)
-                                End If
-                            End If
-                        End If
-
-                        ''***************************************************************
-
-                    End If
-
-                Else
-
-                    For i As Integer = 1 To cantidad_div.Count
-
-                        Dim iCantidad_it As Double = 0
-                        Dim Importe_it As Double = 0
-
-                        Dim iCubreSP As Integer = 0
-                        If i = 1 Then
-                            iCubreSP = 0
-                        Else
-                            iCubreSP = idsp
-                        End If
-
-                        iCantidad_it = cantidad_div.Item(i).ToString '/ equivalenciaSuministroDosis
-                        Importe_it = Funciones.getImporteClasificacionNew(CveMaterial, iCantidad_it, PacienteListaPrecios(CvePaciente))
-                        If Material_ExentoIVA(CveMaterial) = "I" Then
-                            Try
-                                Importe_it = Format(Funciones.Numero_Redondear((Importe_it / Funciones.IvaFactorAumenta()), 2), "##,##0.00")
-                            Catch ex As Exception
-                                Importe_it = 0
-                            End Try
-                        End If
-
-                        If Insert_local("tb_ticketsec_detalle", _
-                                          "clues = '" & Me.CLUES & "', " & _
-                                           "icveticketec='" & Funciones.TicketEC_Id(NumCuenta) & "', " & _
-                                           "cNumTicketEC='" & NumCuenta & "', " & _
-                                           "iCantidad='" & iCantidad_it & "', " & _
-                                           "cDescripcion='" & Descripcion & "', " & _
-                                           "ccvematerial='" & CveMaterial & "', " & _
-                                           "icveclave='" & icveclave & "', " & _
-                                           "icvecama='" & icvecama & "', " & _
-                                           "cCodigoBarras='" & CveMaterial & "', " & _
-                                           "ccveanterior='" & Material_CveAnterior(CveMaterial) & "', " & _
-                                           "ccveunidad='" & cveunidad & "', " & _
-                                           "iPrecioVenta='" & Importe_it & "', " & _
-                                           "iPrecioPublico='" & PrecioPublico & "', " & _
-                                           "iPrecioSujetoCatOficial='" & Material_SujetoCostoOficial(CveMaterial) & "', " & _
-                                           "cExentoIVa='" & Material_ExentoIVA(CveMaterial) & "', " & _
-                                           "cNumLote='', " & _
-                                           "iDescuento='0', " & _
-                                           "cDoctoAbono='', " & _
-                                           "cdscareaafectada = '" & CveServicio & "', " & _
-                                           "icvdiagnostico = '" & IdDiagnostico_EstadoCuenta & "', " & _
-                                           "iCubreSP = '" & iCubreSP & "', " & _
-                                           "ccvematerial_cubresp = '', " & _
-                                           "fchregistro=current_timestamp, " & _
-                                           "motivo_registro_manual='', " & _
-                                           "ccveusuario='servidor_his'") Then
-
-                            If iCubreSP = 0 Then
-                                If notificar_fuera_paquete Then
-                                    Funciones.notificarAlertaProductoCantidadFueraPaquete(CvePaciente, CveMaterial, iCantidad_it, cveunidad, Descripcion)
-                                End If
-                            End If
-                            '***************************************************************
-
-                        End If
-
-                    Next
-
-                End If
-
-                '=====================================================================================================
-
-
+    Private Sub RegistrarLogCamas(ByVal mensaje As String)
+        System.Diagnostics.Trace.WriteLine(mensaje)
+        Try
+            If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Return
+            If Me.InvokeRequired Then
+                Me.BeginInvoke(New Action(Of String)(AddressOf RegistrarLogCamas), mensaje)
+            Else
+                LogEventos.Escribir(mensaje)
             End If
-
-ff:
-
-            Me.ProgressBarX1.Value = Me.ProgressBarX1.Value + 1
-
-        Next
-
+        Catch ex As InvalidOperationException
+            System.Diagnostics.Trace.WriteLine("Camas: formulario cerrado durante el diagnóstico.")
+        End Try
     End Sub
 
 #End Region
@@ -5606,8 +5400,6 @@ ff:
         Return 1
 
     End Function
-
-  
 
 #End Region
 

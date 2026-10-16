@@ -236,42 +236,42 @@ Public Class frmInterface
 
             TimerEnlace.Enabled = False
 
-            '======================================
-            ' Rutinas Importar 
-            '======================================
+            ''======================================
+            '' Rutinas Importar 
+            ''======================================
 
-            '- - Importar Cirugía agendada en el portal. - - - 
-            Try
-                Me.ImportarCirugiaTemporal()
-            Catch ex As Exception
-                LogEventos.Escribir("ImportarCirugiaTemporal. " & ex.Message)
-            End Try
+            ''- - Importar Cirugía agendada en el portal. - - - 
+            'Try
+            '    Me.ImportarCirugiaTemporal()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ImportarCirugiaTemporal. " & ex.Message)
+            'End Try
 
-            '- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - - 
-            Try
-                ImportarFirmasRecibido()
-            Catch ex As Exception
-                LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
-            End Try
+            ''- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - - 
+            'Try
+            '    ImportarFirmasRecibido()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
+            'End Try
 
-            '- - Activo Fijo - - - - - - - - - - - 
-            Try
-                ImportarFotoActivoFijo()
-            Catch ex As Exception
-                LogEventos.Escribir("ImportarFotoActivoFijo. " & ex.Message)
-            End Try
+            ''- - Activo Fijo - - - - - - - - - - - 
+            'Try
+            '    ImportarFotoActivoFijo()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ImportarFotoActivoFijo. " & ex.Message)
+            'End Try
 
 
-            '======================================
-            ' Rutinas Proceso Internos 
-            '======================================
+            ''======================================
+            '' Rutinas Proceso Internos 
+            ''======================================
 
-            '- - Notificacions Paquetes - - - - - - - - - - - 
-            Try
-                Me.notificarAlertaProductoCantidadFueraPaquete()
-            Catch ex As Exception
-                LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
-            End Try
+            ''- - Notificacions Paquetes - - - - - - - - - - - 
+            'Try
+            '    Me.notificarAlertaProductoCantidadFueraPaquete()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
+            'End Try
 
             '- - Cargar Camas - - - - - - - - - - - 
             Try
@@ -282,55 +282,55 @@ Public Class frmInterface
 
 
 
-            '======================================
-            ' Rutinas Exportar 
-            '======================================
+            ''======================================
+            '' Rutinas Exportar 
+            ''======================================
 
-            '== Exportar Tablas de Sistema al Hosting
-            Try
-                Me.ExportarDataToHostingTablasEnlace()
-            Catch ex As Exception
-                LogEventos.Escribir("ExportarDataToHostingTablasEnlace. " & ex.Message)
-            End Try
+            ''== Exportar Tablas de Sistema al Hosting
+            'Try
+            '    Me.ExportarDataToHostingTablasEnlace()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ExportarDataToHostingTablasEnlace. " & ex.Message)
+            'End Try
 
-            Try
-                Me.ExportarDataToHostingExpediente()
-            Catch ex As Exception
-                LogEventos.Escribir("ExportarDataToHostingExpediente. " & ex.Message)
-            End Try
+            'Try
+            '    Me.ExportarDataToHostingExpediente()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ExportarDataToHostingExpediente. " & ex.Message)
+            'End Try
 
-            Try
-                Me.ExportarDataToHostingTablasEstudios()
-            Catch ex As Exception
-                LogEventos.Escribir("ExportarDataToHostingTablasEstudios. " & ex.Message)
-            End Try
+            'Try
+            '    Me.ExportarDataToHostingTablasEstudios()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ExportarDataToHostingTablasEstudios. " & ex.Message)
+            'End Try
 
 
-            ' ======================================
+            '' ======================================
 
-            Me.ProgressBarX1.Value = 0
+            'Me.ProgressBarX1.Value = 0
 
-            '== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == == 
-            Try
-                If lstLog.Items.Count > 5 Then
-                    Me.lstLog.Items.Clear()
-                    Me.DetenerProcesoSP()
-                    TimerEnlace.Enabled = False
-                    Application.Restart()
-                End If
-            Catch ex As Exception
-                LogEventos.Escribir("Application.Restart. " & ex.Message)
-            End Try
+            ''== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == == 
+            'Try
+            '    If lstLog.Items.Count > 5 Then
+            '        Me.lstLog.Items.Clear()
+            '        Me.DetenerProcesoSP()
+            '        TimerEnlace.Enabled = False
+            '        Application.Restart()
+            '    End If
+            'Catch ex As Exception
+            '    LogEventos.Escribir("Application.Restart. " & ex.Message)
+            'End Try
 
-            ' == == == == == == == == == == == == == == == == == == == == == == == == ==
+            '' == == == == == == == == == == == == == == == == == == == == == == == == ==
 
-            ' == Cotinuamente Verificando si la task ya fue terminada
-            Try
-                ReiniciarProcesoSP()
-            Catch ex As Exception
-                LogEventos.Escribir("ReiniciarProcesoSP. " & ex.Message)
-            End Try
-            ' == == == == == == == == == == == == == == == =
+            '' == Cotinuamente Verificando si la task ya fue terminada
+            'Try
+            '    ReiniciarProcesoSP()
+            'Catch ex As Exception
+            '    LogEventos.Escribir("ReiniciarProcesoSP. " & ex.Message)
+            'End Try
+            '' == == == == == == == == == == == == == == == =
 
             TimerEnlace.Enabled = True
 
@@ -4530,7 +4530,7 @@ intenta_otravz:
                 chkActivar.Checked = True
 
                 'Proceso en segundo plano
-                IniciarProcesosSP()
+                'IniciarProcesosSP()
 
             Else
                 chkActivar.Checked = False
@@ -4610,6 +4610,8 @@ intenta_otravz:
     Private Sub TimerReconect_Tick(sender As Object, e As EventArgs) Handles TimerReconect.Tick
 
         Try
+
+            Exit Sub
 
             If load_init = True Then
                 Exit Sub
@@ -5140,7 +5142,8 @@ no_insertar:
             ' Reutilizar la configuración actual sin nuevos servidores, credenciales ni referencias externas.
             conexionCamas = DirectCast(Me.cx_MySQL_local.Clone(), MySqlConnector.MySqlConnection)
             Dim servicio As New HisCargosHospitalizacionAutomaticos(conexionCamas, Me.CLUES,
-                AddressOf BuscarCuentaCamas, AddressOf ObtenerIngresoCamas, AddressOf RegistrarLogCamas)
+                AddressOf BuscarCuentaCamas, AddressOf ObtenerIngresoCamas, AddressOf RegistrarLogCamas,
+                AddressOf RecalcularTotalesCamas)
             Dim conexionTrabajo As MySqlConnector.MySqlConnection = conexionCamas
             Task.Run(Sub()
                          Try
@@ -5188,6 +5191,16 @@ no_insertar:
         Return Funciones.Get_FechaHoraIngresoHospitalario(paciente, recepcion)
     End Function
 
+    ''' <summary>Recalcula una vez por cuenta al finalizar el recorrido de inserciones, en el hilo de los accesos globales.</summary>
+    Private Sub RecalcularTotalesCamas(ByVal numeroCuenta As String)
+        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
+        If Me.InvokeRequired Then
+            Me.Invoke(New Action(Of String)(AddressOf RecalcularTotalesCamas), numeroCuenta)
+            Return
+        End If
+        Funciones.RecalcularTotales(numeroCuenta)
+    End Sub
+
     Private Sub RegistrarLogCamas(ByVal mensaje As String)
         System.Diagnostics.Trace.WriteLine(mensaje)
         Try
@@ -5214,17 +5227,7 @@ no_insertar:
                                                    "ccvepaciente = '" & cvepaciente & "' and " & _
                                                    "cEstatus = 'ABIERTO'")
 
-        If tb_ticketsec.Rows.Count > 0 Then
-
-            Try
-                'actualiza cama en estado de cuenta*****************
-                Me.Update_local("tb_ticketsec", _
-                                "icvecama = '" & icvecama & "'", _
-                                "cNumTicketec", tb_ticketsec.Rows(0).Item(0).ToString)
-                '*****************************************
-            Catch ex As Exception
-            End Try
-        Else
+        If tb_ticketsec.Rows.Count = 0 Then
             Return ""
         End If
 

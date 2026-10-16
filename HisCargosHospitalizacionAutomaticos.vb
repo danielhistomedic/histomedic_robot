@@ -20,6 +20,13 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
     Private ReadOnly cuentaPaciente As Func(Of String, Integer, String)
     Private ReadOnly primerIngreso As Func(Of String, Integer, DateTime)
     Private ReadOnly log As Action(Of String)
+    Private ReadOnly recalcularCuenta As Action(Of String)
+    Private ReadOnly cuentasConInserciones As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+    ' Usar la misma condición en la selección, la revalidación y el INSERT para evitar cobrar un ingreso que cambió de área.
+    Private Const FiltroIngresoFacturable As String =
+        "s.cdscservicio NOT IN ('QUIROFANO','UTQ','RECUPERACION') AND " &
+        "(s.cdscareaafectada='HOSPITALIZACION' OR " &
+        "(s.cdscareaafectada='URGENCIAS' AND r.fchregistro<DATE_SUB(NOW(),INTERVAL 8 HOUR)))"
     Private ReadOnly clues As String
     Private ReadOnly materiales As New Dictionary(Of String, DataRow)(StringComparer.Ordinal)
     Private ReadOnly listas As New Dictionary(Of String, Integer)(StringComparer.Ordinal)
@@ -36,10 +43,11 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
 
     Friend Sub New(ByVal local As MySqlConnection, ByVal unidad As String,
                    ByVal cuenta As Func(Of String, Integer, String),
-                   ByVal ingreso As Func(Of String, Integer, DateTime), ByVal registrar As Action(Of String))
+                   ByVal ingreso As Func(Of String, Integer, DateTime), ByVal registrar As Action(Of String),
+                   ByVal recalcular As Action(Of String))
         Me.New(Function(sql, valores) ConsultarConexion(local, sql, valores),
                Function(sql, valores) InsertarConexion(local, sql, valores),
-               Function(sql, valores) EjecutarConexion(local, sql, valores), unidad, cuenta, ingreso, registrar)
+               Function(sql, valores) EjecutarConexion(local, sql, valores), unidad, cuenta, ingreso, registrar, recalcular)
         conexion = local
     End Sub
 
@@ -48,7 +56,8 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                    ByVal insercion As Func(Of String, IDictionary(Of String, Object), Long),
                    ByVal escritura As Func(Of String, IDictionary(Of String, Object), Integer),
                    ByVal unidad As String, ByVal cuenta As Func(Of String, Integer, String),
-                   ByVal ingreso As Func(Of String, Integer, DateTime), ByVal registrar As Action(Of String))
+                   ByVal ingreso As Func(Of String, Integer, DateTime), ByVal registrar As Action(Of String),
+                   ByVal recalcular As Action(Of String))
         leer = consulta
         insertar = insercion
         ejecutarSql = escritura
@@ -56,6 +65,8 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
         cuentaPaciente = cuenta
         primerIngreso = ingreso
         log = registrar
+        If recalcular Is Nothing Then Throw New ArgumentNullException("recalcular")
+        recalcularCuenta = recalcular
     End Sub
 #End Region
 
@@ -68,13 +79,12 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
             If conexion IsNot Nothing AndAlso conexion.State <> ConnectionState.Open Then conexion.Open()
             VerificarTablas()
             Dim consulta As Stopwatch = Stopwatch.StartNew()
-            ' Conservar urgencias y su umbral heredado; cambiar ese alcance sería otra regla financiera.
+            ' Urgencias requiere más de ocho horas reales; no contar límites de hora con DateDiff.
             Using pacientes As DataTable = leer(
                 "SELECT r.Id,r.ccvepaciente,r.cdscareaafectada,r.fchregistro,r.icvecama,c.ccvematerial AS material_cama " &
                 "FROM tb_urg_recepcion r INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
                 "LEFT JOIN cat_camas c ON c.icvecama=r.icvecama WHERE r.iegresado=0 " &
-                "AND s.cdscservicio NOT IN ('QUIROFANO','UTQ','RECUPERACION') " &
-                "AND s.cdscareaafectada IN ('HOSPITALIZACION','URGENCIAS')", Nothing)
+                "AND " & FiltroIngresoFacturable, Nothing)
                 Trace.WriteLine("Camas: consulta pacientes ms=" & consulta.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture))
                 Dim repeticiones As New Dictionary(Of String, Integer)(StringComparer.Ordinal)
                 For Each paciente As DataRow In pacientes.Rows
@@ -98,6 +108,15 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                 log("Camas: ingresos evaluados=" & pacientes.Rows.Count.ToString(CultureInfo.InvariantCulture))
             End Using
         Finally
+            ' Después de TODOS los INSERT, una vez por cuenta. También cubrir cargos parciales o con respuesta incierta.
+            For Each numero As String In cuentasConInserciones
+                Try
+                    recalcularCuenta(numero)
+                Catch ex As Exception
+                    log("Camas: no se pudo recalcular una cuenta procesada. " & Diagnostico(ex))
+                End Try
+            Next
+            cuentasConInserciones.Clear()
             For Each material As DataRow In materiales.Values
                 material.Table.Dispose()
             Next
@@ -111,8 +130,6 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
 
     Private Sub ProcesarPaciente(ByVal paciente As DataRow)
         Dim ahora As DateTime = DateTime.Now
-        If Texto(paciente, "cdscareaafectada") = "URGENCIAS" AndAlso
-            DateDiff(DateInterval.Hour, CDate(paciente("fchregistro")), ahora) <= 8 Then Return
         Dim cama As Integer = Entero(paciente, "icvecama")
         If cama <= 0 Then Throw New InvalidOperationException("Sin cama válida.")
         Dim consultaMaterial As Stopwatch = Stopwatch.StartNew()
@@ -421,7 +438,9 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                 "@clave", cobro, "@cama", cama, "@anterior", Texto(material, "ccveanterior"), "@unidad", unidad,
                 "@precio", parte.Precio, "@publico", publico, "@oficial", oficial, "@iva", Texto(material, "iExcentoIVA"),
                 "@servicio", servicio, "@dx", diagnostico, "@paquete", parte.Paquete, "@recepcion", recepcion, "@paciente", paciente)
-            ' El mismo INSERT comprueba cama, material, egreso y cuenta abierta; sin modificar columnas existentes.
+            ' Marcar antes de escribir: un fallo de comunicación puede ocurrir después de persistir el cargo.
+            cuentasConInserciones.Add(cuenta)
+            ' El mismo INSERT comprueba el área vigente, horas en urgencias, cama, material, egreso y cuenta abierta.
             Dim cargo As Long = insertar(
                 "INSERT INTO tb_ticketsec_detalle (clues,icveticketec,cNumTicketEC,iCantidad,cDescripcion,ccvematerial,icveclave,icvecama," &
                 "cCodigoBarras,ccveanterior,ccveunidad,iPrecioVenta,iPrecioPublico,iPrecioSujetoCatOficial,cExentoIVA,cNumLote,iDescuento," &
@@ -429,9 +448,11 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                 "SELECT @clues,@id,@cuenta,@cantidad,@descripcion,@material,@clave,@cama,@material,@anterior,@unidad,@precio," &
                 "@publico,@oficial,@iva,'',0,'',@servicio,@dx,@paquete,'',CURRENT_TIMESTAMP,'','servidor_his' " &
                 "FROM tb_urg_recepcion r INNER JOIN tb_ticketsec e ON e.ccvepaciente=r.ccvepaciente " &
-                "INNER JOIN cat_camas c ON c.icvecama=r.icvecama WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente " &
+                "INNER JOIN cat_camas c ON c.icvecama=r.icvecama " &
+                "INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+                "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente " &
                 "AND r.iegresado=0 AND r.icvecama=@cama AND c.ccvematerial=@material AND e.icveticketec=@id " &
-                "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO'", valores)
+                "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' AND " & FiltroIngresoFacturable, valores)
             If cargo <= 0 Then Throw New InvalidOperationException("Cargo no confirmado. Revisar el periodo en proceso sin recobrar.")
             If ejecutarSql("UPDATE robot_camas_detalles SET id_cargo=@cargo WHERE id_periodo=@id AND parte=@parte AND id_cargo IS NULL",
                            P("@cargo", cargo, "@id", idControl, "@parte", i + 1)) <> 1 Then
@@ -449,8 +470,12 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
     End Sub
 
     Private Sub ValidarVigencia(ByVal recepcion As Integer, ByVal paciente As String, ByVal cama As Integer, ByVal cuenta As String)
-        Using tabla As DataTable = leer("SELECT r.Id FROM tb_urg_recepcion r INNER JOIN tb_ticketsec e ON e.ccvepaciente=r.ccvepaciente WHERE r.Id=@id AND r.ccvepaciente=@paciente AND r.iegresado=0 AND r.icvecama=@cama AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO'", P("@id", recepcion, "@paciente", paciente, "@cama", cama, "@cuenta", cuenta))
-            If tabla.Rows.Count <> 1 Then Throw New InvalidOperationException("Cambió el ingreso, la cama o la cuenta.")
+        Using tabla As DataTable = leer("SELECT r.Id FROM tb_urg_recepcion r INNER JOIN tb_ticketsec e ON e.ccvepaciente=r.ccvepaciente " &
+            "INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+            "WHERE r.Id=@id AND r.ccvepaciente=@paciente AND r.iegresado=0 AND r.icvecama=@cama " &
+            "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' AND " & FiltroIngresoFacturable,
+            P("@id", recepcion, "@paciente", paciente, "@cama", cama, "@cuenta", cuenta))
+            If tabla.Rows.Count <> 1 Then Throw New InvalidOperationException("El ingreso ya no cumple el área o permanencia requerida, o cambió la cama o la cuenta.")
         End Using
     End Sub
 

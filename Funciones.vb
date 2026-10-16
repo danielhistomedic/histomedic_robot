@@ -1307,6 +1307,38 @@ valida_cantidad_2:
 
 #End Region
 
+
+#Region "Otras Funciones"
+
+    ''' <summary>
+    ''' Configuarciones Varioas de Operación. Devielve el valor configurado en Datos de Unidad
+    ''' </summary>
+    ''' <param name="concepto"></param>
+    ''' <returns></returns>
+    ''' <remarks></remarks>
+    Shared Function getValorConfiguracion(ByVal concepto As String) As String
+
+        Try
+
+            Dim tb_valor As DataTable
+            tb_valor = frmInterface.tb_Recordset_MySQL_local("SELECT ccvematerial as valor from cat_materiales_configuracion where cConcepto = '" & concepto & "'")
+            If tb_valor.Rows.Count = 0 Then
+                Return "0"
+            End If
+            Return tb_valor.Rows(0).Item("valor").ToString
+        Catch ex As Exception
+            Return "0"
+        End Try
+
+        Return "0"
+
+    End Function
+
+
+#End Region
+
+
+
 End Class
 
 Public Class FacturacionEnviarOrdenInternamiento

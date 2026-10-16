@@ -5118,12 +5118,20 @@ no_insertar:
 
     Private Sub Cargar_Costo_Dias_Cama_Hosp()
 
+        If Funciones.getValorConfiguracion("ACTIVAR_REGISTRO_AUTOMATICO_CAMAS") = 0 Then
+            Exit Sub
+        End If
+
+
         Dim CveMaterial As String
         Dim CvePaciente As String
         Dim NumCuenta As String
         Dim icveclave As Integer
         Dim icvecama As Integer
         Dim CveServicio As String
+
+
+
 
         Dim tb_rec As Data.DataTable
         tb_rec = tb_Recordset_MySQL_local("SELECT " & _
@@ -5402,7 +5410,7 @@ ff:
 
 #End Region
 
-#Region "Procesos Esados de Cuenta"
+#Region "Procesos Estados de Cuenta"
 
     Private Function NumCuentaPaciente(ByVal cvepaciente As String, icvecama As Integer) As String
 

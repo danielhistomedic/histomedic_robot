@@ -44,6 +44,17 @@ Public Class frmInterface
     Private cts As CancellationTokenSource
     Private export_hosting_tarea As Task
 
+    ' Los comandos y el cierre de canales centrales usan el mismo bloqueo.
+    Private ReadOnly bloqueoConexionCentral As New Object()
+    Private ReadOnly bloqueoProcesoSP As New Object()
+    Private estadoConexionCentral As Integer = 0
+    Private comprobacionCentralActiva As Integer = 0
+    Private robotActivo As Integer = 0
+    Private cerrandoRobot As Integer = 0
+    Private intentosReconexionCentral As Integer = 0
+    Private proximaComprobacionCentralTicks As Long = 0
+    Private WithEvents TimerReconexionCentral As New System.Timers.Timer(5000)
+
 #Region "Propiedades"
 
     Protected str_FTP_USUARIO As String
@@ -83,6 +94,12 @@ Public Class frmInterface
 
     Private Function HabilitarEstatusConexionCentral(ByVal valor As Boolean)
 
+        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Return Nothing
+        If Me.InvokeRequired Then
+            Me.BeginInvoke(New Action(Of Boolean)(Sub(estado) HabilitarEstatusConexionCentral(estado)), valor)
+            Return Nothing
+        End If
+
         If valor Then
             Me.btnConectarDBCentral.TextColor = Color.Green
         Else
@@ -90,6 +107,144 @@ Public Class frmInterface
         End If
 
     End Function
+
+    Private ReadOnly Property CentralDisponible As Boolean
+        Get
+            Return Interlocked.CompareExchange(estadoConexionCentral, 0, 0) = 1
+        End Get
+    End Property
+
+    Private Shared Function EsperaReconexionCentral(ByVal intentos As Integer) As Integer
+        Select Case intentos
+            Case 0 : Return 20000
+            Case 1 : Return 60000
+            Case 2 : Return 180000
+            Case Else : Return 300000
+        End Select
+    End Function
+
+    Private Shared Function EsFalloDeTransporte(ByVal fallo As Exception, ByVal canal As MySqlConnector.MySqlConnection) As Boolean
+        If canal Is Nothing OrElse canal.State <> ConnectionState.Open Then Return True
+        Dim causa As Exception = fallo
+        While causa IsNot Nothing
+            If TypeOf causa Is System.Net.Sockets.SocketException OrElse TypeOf causa Is IOException OrElse TypeOf causa Is TimeoutException Then Return True
+            If TypeOf causa Is MySqlConnector.MySqlException Then
+                Select Case DirectCast(causa, MySqlConnector.MySqlException).Number
+                    Case 1042, 2002, 2003, 2006, 2013 : Return True
+                End Select
+            End If
+            causa = causa.InnerException
+        End While
+        Return False
+    End Function
+
+    Private Sub RegistrarErrorCentral(ByVal fallo As Exception, ByVal canal As MySqlConnector.MySqlConnection, ByVal operacion As String)
+        If EsFalloDeTransporte(fallo, canal) Then NotificarDesconexionCentral()
+        Dim codigo As String = fallo.GetType().Name
+        If TypeOf fallo Is MySqlConnector.MySqlException Then codigo &= " MySQL=" & DirectCast(fallo, MySqlConnector.MySqlException).Number.ToString()
+        ' No registrar consultas, datos de pacientes ni credenciales.
+        AgregarLog(100, "[Central] " & operacion & ": " & codigo & ". La función no reintenta la operación SQL.")
+    End Sub
+
+    Private Sub NotificarDesconexionCentral(Optional ByVal motivo As String = "")
+        If Interlocked.Exchange(estadoConexionCentral, 0) = 1 OrElse Not String.IsNullOrWhiteSpace(motivo) Then
+            intentosReconexionCentral = 0
+            Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddMilliseconds(EsperaReconexionCentral(0)).Ticks)
+            AgregarLog(100, "[Central] Conexión no disponible; primer reintento en 20 segundos.")
+        End If
+        If Not String.IsNullOrWhiteSpace(motivo) Then AgregarLog(100, "[Central] " & motivo)
+        HabilitarEstatusConexionCentral(False)
+        DetenerProcesoSP()
+    End Sub
+
+    Public Function DetectarEstadoConexionCentral() As Boolean
+        SyncLock bloqueoConexionCentral
+            Dim comprobado As MySqlConnector.MySqlConnection = Nothing
+            Try
+                For Each canal As MySqlConnector.MySqlConnection In New MySqlConnector.MySqlConnection() {cx_MySQL_Central, cx_MySQL_CentralAsync, cx_MySQL_CentralAsyncALM}
+                    comprobado = canal
+                    If canal Is Nothing OrElse canal.State <> ConnectionState.Open Then
+                        NotificarDesconexionCentral()
+                        Return False
+                    End If
+                    Using comando As New MySqlConnector.MySqlCommand("SELECT 1", canal)
+                        comando.CommandTimeout = 5
+                        comando.ExecuteScalar()
+                    End Using
+                Next
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, comprobado, "Comprobar disponibilidad")
+                Return False
+            End Try
+        End SyncLock
+    End Function
+
+    Private Sub CerrarConexionesCentrales()
+        SyncLock bloqueoConexionCentral
+            For Each canal As MySqlConnector.MySqlConnection In New MySqlConnector.MySqlConnection() {cx_MySQL_Central, cx_MySQL_CentralAsync, cx_MySQL_CentralAsyncALM, cx_MySQL_Admin}
+                If canal Is Nothing Then Continue For
+                Try
+                    canal.Close()
+                    MySqlConnector.MySqlConnection.ClearPool(canal)
+                Catch ex As Exception
+                    LogEventos.Escribir("[Central] No se pudo liberar un canal: " & ex.GetType().Name)
+                End Try
+            Next
+        End SyncLock
+    End Sub
+
+    Private Sub RevisarConexionCentral()
+        Try
+            If Not CentralDisponible Then
+                DetenerProcesoSP()
+                SyncLock bloqueoProcesoSP
+                    ' Esperar el fin del lote cancelado sin bloquear la interfaz ni cerrar sus canales.
+                    If export_hosting_tarea IsNot Nothing AndAlso Not export_hosting_tarea.IsCompleted Then
+                        Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddSeconds(5).Ticks)
+                        Return
+                    End If
+                End SyncLock
+            End If
+            SyncLock bloqueoConexionCentral
+                If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
+                If CentralDisponible Then
+                    Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddSeconds(30).Ticks)
+                    DetectarEstadoConexionCentral()
+                Else
+                    intentosReconexionCentral += 1
+                    CerrarConexionesCentrales()
+                    Dim conectado As Boolean = Not String.IsNullOrWhiteSpace(Me.CLUES) AndAlso Conectar_Central(Me.CLUES)
+                    If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then
+                        CerrarConexionesCentrales()
+                        Return
+                    End If
+                    If conectado Then
+                        Interlocked.Exchange(estadoConexionCentral, 1)
+                        intentosReconexionCentral = 0
+                        Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddSeconds(30).Ticks)
+                        HabilitarEstatusConexionCentral(True)
+                        AgregarLog(100, "[Central] Los tres canales están conectados.")
+                    Else
+                        CerrarConexionesCentrales()
+                        Dim espera As Integer = EsperaReconexionCentral(intentosReconexionCentral)
+                        Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddMilliseconds(espera).Ticks)
+                        HabilitarEstatusConexionCentral(False)
+                        AgregarLog(100, "[Central] Intento no completado; próximo intento en " & (espera \ 1000).ToString() & " segundos.")
+                    End If
+                End If
+            End SyncLock
+            If CentralDisponible Then ReiniciarProcesoSP()
+        Catch ex As Exception
+            Interlocked.Exchange(estadoConexionCentral, 0)
+            DetenerProcesoSP()
+            HabilitarEstatusConexionCentral(False)
+            Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddMinutes(5).Ticks)
+            AgregarLog(100, "[Central] Falló la comprobación: " & ex.GetType().Name & ". Próximo intento en cinco minutos.")
+        Finally
+            Interlocked.Exchange(comprobacionCentralActiva, 0)
+        End Try
+    End Sub
 
     Private Function HabilitarEstatusConexionLocal(ByVal valor As Boolean)
 
@@ -103,6 +258,8 @@ Public Class frmInterface
 
     Private Function Conectar_Central(clues) As Boolean
 
+        ' Durante Load todavía no está iniciado el temporizador de reconexión.
+        If load_init Then Interlocked.Exchange(comprobacionCentralActiva, 1)
         Try
 
             Dim Database As String = ""
@@ -128,29 +285,23 @@ Public Class frmInterface
             Pwd = tb_ClienteData.Rows(0).Item("db_pass").ToString
             ' ==================================================================================================================================
 
-            If cx_MySQL_Central.State = ConnectionState.Open Then
-                Me.HabilitarEstatusConexionCentral(True)
-                Return True
-            End If
 
             Dim cadena_conexion As String = "Server=histomedic.mx;Database=" & Database & ";Uid=" & Uid & ";Pwd=" & Pwd & ";SSL Mode=None;"
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                If Test_MySQL_Central(cadena_conexion) Then
-                    Me.HabilitarEstatusConexionCentral(True)
-                    Test_MySQL_CentralAsync(cadena_conexion)
-                    Test_MySQL_CentralAsyncALM(cadena_conexion)
-                    Return True
-                Else
-                    Return False
-                End If
+            Dim conectado As Boolean = Test_MySQL_Central(cadena_conexion) AndAlso Test_MySQL_CentralAsync(cadena_conexion) AndAlso Test_MySQL_CentralAsyncALM(cadena_conexion)
+            If conectado Then
+                Interlocked.Exchange(estadoConexionCentral, 1)
+                HabilitarEstatusConexionCentral(True)
             End If
+            Return conectado
 
         Catch ex As Exception
-            AgregarLog(500, ex.Message & ". Equipo No Compatible con WebRequest ")
+            RegistrarErrorCentral(ex, cx_MySQL_Central, "Conectar_Central")
             Return False
+        Finally
+            If load_init Then Interlocked.Exchange(comprobacionCentralActiva, 0)
         End Try
 
-        Return True
+        Return False
 
     End Function
 
@@ -314,8 +465,11 @@ Public Class frmInterface
     Private Sub ExportarDataToHostingSP_Load(token As CancellationToken)
 
         While Not token.IsCancellationRequested
-            Me.ExportarDataToHostingSP()
-            Me.ExportarDataToHostingSP_Almacen()
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Me.ExportarDataToHostingSP()
+                If Not token.IsCancellationRequested AndAlso CentralDisponible Then Me.ExportarDataToHostingSP_Almacen()
+            End If
+            token.WaitHandle.WaitOne(1000)
         End While
 
     End Sub
@@ -326,6 +480,7 @@ Public Class frmInterface
     ''' <remarks></remarks>
     Private Sub ExportarDataToHostingSP()
 
+        If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
         Try
 
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
@@ -383,6 +538,7 @@ Public Class frmInterface
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
 
+                If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
                 longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
@@ -737,6 +893,7 @@ Public Class frmInterface
 
     Private Sub ExportarDataToHostingSP_Almacen()
 
+        If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
         Try
 
             Dim limittext As String = Me.txtLimitRegistros.Text.Trim
@@ -789,6 +946,7 @@ Public Class frmInterface
             Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
+                If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
 
                 longblob_filed_contain = False
 
@@ -2476,28 +2634,26 @@ Public Class frmInterface
     Private Function Update_FotoSistema_Central(ByVal Campo As String, ByVal Tabla As String, _
                                         ByVal IdCampo As String, ByVal IdValor As String, _
                                         ByVal Imagen As Byte()) As Boolean
-
-        Try
-            Dim cmdtext As String
-            cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
-            Dim cmd As New Global.MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_Central)
+        Dim cmdtext As String
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
+            End If
             Try
-                If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-                cmd.Parameters.AddWithValue("?File", Imagen)
-                cmd.ExecuteNonQuery()
-                cmd.Parameters.Clear()
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_Central)
+                    cmm_Comando.Parameters.AddWithValue("?File", Imagen)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
             Catch ex As Exception
-                AgregarLog(500, ex.Message & ", Error al actualizar imagen central: " & IdValor)
-                'Me.lstLog.Items.Add(Calcula_FechaActual.ToString)
-                'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(ex.Message & ", Error al actualizar imagen central: " & IdValor)
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Update_FotoSistema_Central")
+                Return False
             End Try
-
-        Catch ex As Exception
-            Return False
-        End Try
-
-        Return True
-
+        End SyncLock
     End Function
 
     Private Function UsuarioNombre(ByVal CveMedico As String) As String
@@ -2554,25 +2710,28 @@ Public Class frmInterface
 
     Private Sub DetenerProcesoSP()
 
-        If cts IsNot Nothing Then
-            cts.Cancel()
-        End If
+        SyncLock bloqueoProcesoSP
+            If cts IsNot Nothing Then cts.Cancel()
+        End SyncLock
 
     End Sub
 
     Private Sub IniciarProcesosSP()
 
-        cts = New CancellationTokenSource()
-        export_hosting_tarea = Task.Run(Sub() ExportarDataToHostingSP_Load(cts.Token), cts.Token)
+        SyncLock bloqueoProcesoSP
+            If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 Then Return
+            If export_hosting_tarea IsNot Nothing AndAlso Not export_hosting_tarea.IsCompleted Then Return
+            If cts IsNot Nothing Then cts.Dispose()
+            Dim solicitud As New CancellationTokenSource()
+            cts = solicitud
+            export_hosting_tarea = Task.Run(Sub() ExportarDataToHostingSP_Load(solicitud.Token), solicitud.Token)
+        End SyncLock
 
     End Sub
 
     Private Sub ReiniciarProcesoSP()
 
-
-        If export_hosting_tarea Is Nothing OrElse export_hosting_tarea.IsCompleted Then
-            IniciarProcesosSP()
-        End If
+        IniciarProcesosSP()
 
     End Sub
 
@@ -3158,63 +3317,48 @@ no_insertar_cx:
 
     Public Function Insert_Admin(ByVal query As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(query, cx_MySQL_Admin)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then cx_MySQL_Admin.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro admin: " & query)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro admin: " & query)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Admin.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(query, cx_MySQL_Admin)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "Insert_Admin")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Insert_Admin(ByVal NomTabla As String, ByVal ValorSET As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Insert into " & NomTabla & _
                  " SET " & ValorSET
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
-        Dim ciclo As Integer = 0
 
-        Try
-
-intenta_otravz:
-
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then cx_MySQL_Admin.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro Admin: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro Admin: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Admin.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "Insert_Admin")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Property cx_MySQL_Admin() As MySqlConnector.MySqlConnection
@@ -3228,170 +3372,148 @@ intenta_otravz:
     End Property
 
     Public Function tb_Recordset_MySQL_Admin(ByVal Comando As String) As Data.DataTable
-
-        Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
-        Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Admin)
-        Dim dt_DataTable As New System.Data.DataTable
-        da_Adaptador.SelectCommand = cmm_Comando
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then cx_MySQL_Admin.Open()
-            da_Adaptador.Fill(dt_DataTable)
-        Catch ex As Exception
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al leer registro Admin: " & Comando)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al leer registro Admin: " & Comando)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (Not CentralDisponible AndAlso Interlocked.CompareExchange(comprobacionCentralActiva, 0, 0) = 0) Then Return New DataTable()
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (Not CentralDisponible AndAlso Interlocked.CompareExchange(comprobacionCentralActiva, 0, 0) = 0) Then Return New DataTable()
+            If cx_MySQL_Admin.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return New DataTable()
             End If
-        End Try
-
-        Return dt_DataTable
-
-
+            Dim tabla As New DataTable()
+            Try
+                Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Admin)
+                    Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
+                        adaptador.Fill(tabla)
+                    End Using
+                End Using
+                Return tabla
+            Catch ex As Exception
+                tabla.Dispose()
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "tb_Recordset_MySQL_Admin")
+                Return New DataTable()
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_Admin(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then cx_MySQL_Admin.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro Admin: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro Admin: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Admin.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "Update_Admin")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_Admin(ByVal NomTabla As String, ByVal ValorSET As String, ByVal CampoCond As String, ByVal ValorFiltro As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Update " & NomTabla & _
                  " SET " & ValorSET & _
                  " where " & CampoCond & _
                  " = '" & ValorFiltro & "'"
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then cx_MySQL_Admin.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Admin.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro Admin: " & Cadena)
-                    'Me.lstLog.Items.Add(Calcula_FechaActual.ToString)
-                    'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(ex.Message & ", Error al actualizar registro Admin: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro Admin: " & Cadena)
-                'Me.lstLog.Items.Add(Calcula_FechaActual.ToString)
-                'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(ex.Message & ", Error al actualizar registro Admin: " & Cadena)
+
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Admin.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Admin)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "Update_Admin")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Test_MySQL_Admin(ByVal str_ConStr As String) As Boolean
-
-        Dim ciclo As Integer = 0
-        Try
-
-intenta_otravz:
-
-            If cx_MySQL_Admin.State = ConnectionState.Open Then Return True
-            cx_MySQL_Admin.ConnectionString = str_ConStr
-            cx_MySQL_Admin.Open()
-
-            Dim cmd As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsyncALM)
-            cmd.ExecuteNonQuery()
-
-            Return True
-        Catch ex As Exception
-
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+            Try
+                If cx_MySQL_Admin.State = ConnectionState.Open Then Return True
+                If cx_MySQL_Admin.State <> ConnectionState.Closed Then cx_MySQL_Admin.Close()
+                Dim opciones As New MySqlConnector.MySqlConnectionStringBuilder(str_ConStr)
+                opciones.ConnectionTimeout = 10
+                opciones.DefaultCommandTimeout = 30
+                opciones.Keepalive = 60
+                cx_MySQL_Admin.ConnectionString = opciones.ConnectionString
+                cx_MySQL_Admin.Open()
+                Using comando As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_Admin)
+                    comando.CommandTimeout = 10
+                    comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Admin, "Test_MySQL_Admin")
                 Return False
-            End If
-            GoTo intenta_otravz
-            Return False
-        End Try
-
+            End Try
+        End SyncLock
     End Function
 
     '****** Central Async ***********************************************
 
     Public Function Insert_CentralAsync(ByVal query As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(query, cx_MySQL_CentralAsync)
-        Dim ciclo As Integer = 0
-        Try
-
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al insertar registro central: " & query)
-                Exit Try
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
             End If
-            GoTo intenta_otravz
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(query, cx_MySQL_CentralAsync)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Insert_CentralAsync")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Insert_CentralAsync(ByVal NomTabla As String, ByVal ValorSET As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Insert into " & NomTabla & _
                  " SET " & ValorSET
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
-        Dim ciclo As Integer = 0
 
-        Try
-
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al insertar registro central Async: " & Cadena)
-                Exit Try
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
             End If
-            GoTo intenta_otravz
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Insert_CentralAsync")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Property cx_MySQL_CentralAsync() As MySqlConnector.MySqlConnection
@@ -3405,155 +3527,146 @@ intenta_otravz:
     End Property
 
     Public Function tb_Recordset_MySQL_CentralAsync(ByVal Comando As String) As Data.DataTable
-
-        Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
-        Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsync)
-        Dim dt_DataTable As New System.Data.DataTable
-        da_Adaptador.SelectCommand = cmm_Comando
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            da_Adaptador.Fill(dt_DataTable)
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al leer registro central Async: " & Comando)
-                Exit Try
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return New DataTable()
             End If
-            GoTo intenta_otravz
-        End Try
-
-        Return dt_DataTable
-
-
+            Dim tabla As New DataTable()
+            Try
+                Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsync)
+                    Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
+                        adaptador.Fill(tabla)
+                    End Using
+                End Using
+                Return tabla
+            Catch ex As Exception
+                tabla.Dispose()
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "tb_Recordset_MySQL_CentralAsync")
+                Return New DataTable()
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_CentralAsync(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central Async: " & Cadena)
-                Exit Try
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
             End If
-            GoTo intenta_otravz
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Update_CentralAsync")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_CentralAsync(ByVal NomTabla As String, ByVal ValorSET As String, ByVal CampoCond As String, ByVal ValorFiltro As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Update " & NomTabla & _
                  " SET " & ValorSET & _
                  " where " & CampoCond & _
                  " = '" & ValorFiltro & "'"
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central Async: " & Cadena)
-                Exit Try
-            End If
-            GoTo intenta_otravz
-        End Try
-        Return True
 
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
+            End If
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Update_CentralAsync")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Test_MySQL_CentralAsync(ByVal str_ConStr As String) As Boolean
-
-        Dim ciclo As Integer = 0
-        Try
-
-intenta_otravz:
-
-            If cx_MySQL_CentralAsync.State = ConnectionState.Open Then Return True
-            cx_MySQL_CentralAsync.ConnectionString = str_ConStr
-            cx_MySQL_CentralAsync.Open()
-
-            Dim cmd As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsyncALM)
-            cmd.ExecuteNonQuery()
-
-            Return True
-        Catch ex As Exception
-
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+            Try
+                If cx_MySQL_CentralAsync.State = ConnectionState.Open Then Return True
+                If cx_MySQL_CentralAsync.State <> ConnectionState.Closed Then cx_MySQL_CentralAsync.Close()
+                Dim opciones As New MySqlConnector.MySqlConnectionStringBuilder(str_ConStr)
+                opciones.ConnectionTimeout = 10
+                opciones.DefaultCommandTimeout = 30
+                opciones.Keepalive = 60
+                cx_MySQL_CentralAsync.ConnectionString = opciones.ConnectionString
+                cx_MySQL_CentralAsync.Open()
+                Using comando As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsync)
+                    comando.CommandTimeout = 10
+                    comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Test_MySQL_CentralAsync")
                 Return False
-            End If
-            GoTo intenta_otravz
-            Return False
-        End Try
-
+            End Try
+        End SyncLock
     End Function
 
     Private Function Update_FotoSistema_CentralAsync(ByVal Campo As String, ByVal Tabla As String, _
                                        ByVal IdCampo As String, ByVal IdValor As String, _
                                        ByVal Imagen As Byte()) As Boolean
-
-        Try
-            Dim cmdtext As String
-            cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
-            Dim cmd As New Global.MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsync)
-            Dim ciclo As Integer = 0
+        Dim cmdtext As String
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
+            End If
             Try
-intenta_otravz:
-                If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-                cmd.Parameters.AddWithValue("?File", Imagen)
-                cmd.ExecuteNonQuery()
-                cmd.Parameters.Clear()
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsync)
+                    cmm_Comando.Parameters.AddWithValue("?File", Imagen)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
             Catch ex As Exception
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ",  Error al actualizar imagen central Async: " & cmdtext)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Update_FotoSistema_CentralAsync")
+                Return False
             End Try
-
-        Catch ex As Exception
-            Return False
-        End Try
-
-        Return True
-
+        End SyncLock
     End Function
 
     Public Function Delete_CentralAsync(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsync.State = ConnectionState.Closed Then cx_MySQL_CentralAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ". Error al eliminar registro: " & Cadena)
-                Exit Try
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsync.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
             End If
-            GoTo intenta_otravz
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsync, "Delete_CentralAsync")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
 
@@ -3561,61 +3674,48 @@ intenta_otravz:
 
     Public Function Insert_CentralAsyncALM(ByVal query As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(query, cx_MySQL_CentralAsyncALM)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro central ALM: " & query)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro central ALM: " & query)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(query, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Insert_CentralAsyncALM")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Insert_CentralAsyncALM(ByVal NomTabla As String, ByVal ValorSET As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Insert into " & NomTabla & _
                  " SET " & ValorSET
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
-        Dim ciclo As Integer = 0
 
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro central AsyncALM: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro central: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Insert_CentralAsyncALM")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Property cx_MySQL_CentralAsyncALM() As MySqlConnector.MySqlConnection
@@ -3629,162 +3729,146 @@ intenta_otravz:
     End Property
 
     Public Function tb_Recordset_MySQL_CentralAsyncALM(ByVal Comando As String) As Data.DataTable
-
-        Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
-        Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsyncALM)
-        Dim dt_DataTable As New System.Data.DataTable
-        da_Adaptador.SelectCommand = cmm_Comando
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            da_Adaptador.Fill(dt_DataTable)
-        Catch ex As Exception
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al leer registro central AsyncALM: " & Comando)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al leer registro central: " & Comando)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return New DataTable()
             End If
-        End Try
-
-        Return dt_DataTable
-
-
+            Dim tabla As New DataTable()
+            Try
+                Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsyncALM)
+                    Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
+                        adaptador.Fill(tabla)
+                    End Using
+                End Using
+                Return tabla
+            Catch ex As Exception
+                tabla.Dispose()
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "tb_Recordset_MySQL_CentralAsyncALM")
+                Return New DataTable()
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_CentralAsyncALM(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-
-        Catch ex As Exception
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro central AsyncALM: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central AsyncALM: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Update_CentralAsyncALM")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_CentralAsyncALM(ByVal NomTabla As String, ByVal ValorSET As String, ByVal CampoCond As String, ByVal ValorFiltro As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Update " & NomTabla & _
                  " SET " & ValorSET & _
                  " where " & CampoCond & _
                  " = '" & ValorFiltro & "'"
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central AsyncALM: " & Cadena)
-                Exit Try
-            End If
-            GoTo intenta_otravz
-        End Try
-        Return True
 
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
+            End If
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Update_CentralAsyncALM")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Test_MySQL_CentralAsyncALM(ByVal str_ConStr As String) As Boolean
-
-        Dim ciclo As Integer = 0
-        Try
-
-intenta_otravz:
-
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Open Then Return True
-            cx_MySQL_CentralAsyncALM.ConnectionString = str_ConStr
-            cx_MySQL_CentralAsyncALM.Open()
-
-            Dim cmd As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsyncALM)
-            cmd.ExecuteNonQuery()
-
-            Return True
-        Catch ex As Exception
-
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+            Try
+                If cx_MySQL_CentralAsyncALM.State = ConnectionState.Open Then Return True
+                If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Close()
+                Dim opciones As New MySqlConnector.MySqlConnectionStringBuilder(str_ConStr)
+                opciones.ConnectionTimeout = 10
+                opciones.DefaultCommandTimeout = 30
+                opciones.Keepalive = 60
+                cx_MySQL_CentralAsyncALM.ConnectionString = opciones.ConnectionString
+                cx_MySQL_CentralAsyncALM.Open()
+                Using comando As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsyncALM)
+                    comando.CommandTimeout = 10
+                    comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Test_MySQL_CentralAsyncALM")
                 Return False
-            End If
-            GoTo intenta_otravz
-            Return False
-        End Try
-
+            End Try
+        End SyncLock
     End Function
 
     Private Function Update_FotoSistema_CentralAsyncALM(ByVal Campo As String, ByVal Tabla As String, _
                                        ByVal IdCampo As String, ByVal IdValor As String, _
                                        ByVal Imagen As Byte()) As Boolean
-
-        Try
-            Dim cmdtext As String
-            cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
-            Dim cmd As New Global.MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsyncALM)
+        Dim cmdtext As String
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return False
+            End If
             Try
-                If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-                cmd.Parameters.AddWithValue("?File", Imagen)
-                cmd.ExecuteNonQuery()
-                cmd.Parameters.Clear()
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.Parameters.AddWithValue("?File", Imagen)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
             Catch ex As Exception
-                AgregarLog(500, ex.Message & ", Error al actualizar imagen central Async: " & IdValor)
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Update_FotoSistema_CentralAsyncALM")
+                Return False
             End Try
-
-        Catch ex As Exception
-            Return False
-        End Try
-
-        Return True
-
+        End SyncLock
     End Function
 
     Public Function Delete_CentralAsyncALM(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then cx_MySQL_CentralAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-
-            If cx_MySQL_CentralAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ". Error al eliminar registro: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ". Error al eliminar registro: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_CentralAsyncALM.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_CentralAsyncALM, "Delete_CentralAsyncALM")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
 
@@ -3792,61 +3876,48 @@ intenta_otravz:
 
     Public Function Insert_Central(ByVal query As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(query, cx_MySQL_Central)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro central: " & query)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro central: " & query)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(query, cx_MySQL_Central)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Insert_Central")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Insert_Central(ByVal NomTabla As String, ByVal ValorSET As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Insert into " & NomTabla & _
                  " SET " & ValorSET
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
-        Dim ciclo As Integer = 0
 
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al insertar registro central: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al insertar registro central: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-            Return False
-        End Try
-
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Insert_Central")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Property cx_MySQL_Central() As MySqlConnector.MySqlConnection
@@ -3860,116 +3931,100 @@ intenta_otravz:
     End Property
 
     Public Function tb_Recordset_MySQL_Central(ByVal Comando As String) As Data.DataTable
-
-        Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
-        Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Central)
-        Dim dt_DataTable As New System.Data.DataTable
-        da_Adaptador.SelectCommand = cmm_Comando
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            da_Adaptador.Fill(dt_DataTable)
-        Catch ex As Exception
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al leer registro central: " & Comando)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al leer registro central: " & Comando)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
+                Return New DataTable()
             End If
-        End Try
-
-        Return dt_DataTable
-
-
+            Dim tabla As New DataTable()
+            Try
+                Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Central)
+                    Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
+                        adaptador.Fill(tabla)
+                    End Using
+                End Using
+                Return tabla
+            Catch ex As Exception
+                tabla.Dispose()
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "tb_Recordset_MySQL_Central")
+                Return New DataTable()
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_Central(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            cmm_Comando.ExecuteNonQuery()
-
-        Catch ex As Exception
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro central: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Update_Central")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Update_Central(ByVal NomTabla As String, ByVal ValorSET As String, ByVal CampoCond As String, ByVal ValorFiltro As String) As Boolean
-
         Dim Cadena As String = ""
         Cadena = "Update " & NomTabla & _
                  " SET " & ValorSET & _
                  " where " & CampoCond & _
                  " = '" & ValorFiltro & "'"
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro central: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro central: " & Cadena)
+
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Update_Central")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
     Public Function Test_MySQL_Central(ByVal str_ConStr As String) As Boolean
-
-        Dim ciclo As Integer = 0
-        Try
-
-intenta_otravz:
-
-            If cx_MySQL_Central.State = ConnectionState.Open Then Return True
-            cx_MySQL_Central.ConnectionString = str_ConStr
-            cx_MySQL_Central.Open()
-
-            Dim cmd As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_CentralAsyncALM)
-            cmd.ExecuteNonQuery()
-
-            Return True
-        Catch ex As Exception
-
-            ciclo = ciclo + 1
-            If ciclo = 3 Then
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return False
+            Try
+                If cx_MySQL_Central.State = ConnectionState.Open Then Return True
+                If cx_MySQL_Central.State <> ConnectionState.Closed Then cx_MySQL_Central.Close()
+                Dim opciones As New MySqlConnector.MySqlConnectionStringBuilder(str_ConStr)
+                opciones.ConnectionTimeout = 10
+                opciones.DefaultCommandTimeout = 30
+                opciones.Keepalive = 60
+                cx_MySQL_Central.ConnectionString = opciones.ConnectionString
+                cx_MySQL_Central.Open()
+                Using comando As New MySqlConnector.MySqlCommand("SET time_zone = 'America/Mexico_City';", cx_MySQL_Central)
+                    comando.CommandTimeout = 10
+                    comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Test_MySQL_Central")
                 Return False
-            End If
-            GoTo intenta_otravz
-            Return False
-        End Try
-
+            End Try
+        End SyncLock
     End Function
 
     '*****************************************************
@@ -4045,28 +4100,23 @@ intenta_otravz:
 
     Public Function Delete_Central(ByVal Cadena As String) As Boolean
 
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_Central.State = ConnectionState.Closed Then cx_MySQL_Central.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-
-            If cx_MySQL_Central.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ". Error al eliminar registro: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ". Error al eliminar registro: " & Cadena)
+        If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+        SyncLock bloqueoConexionCentral
+            If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
+            If cx_MySQL_Central.State <> ConnectionState.Open Then
+                NotificarDesconexionCentral()
                 Return False
             End If
-        End Try
-        Return True
-
+            Try
+                Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
+                    cmm_Comando.ExecuteNonQuery()
+                End Using
+                Return True
+            Catch ex As Exception
+                RegistrarErrorCentral(ex, cx_MySQL_Central, "Delete_Central")
+                Return False
+            End Try
+        End SyncLock
     End Function
 
 
@@ -4481,6 +4531,8 @@ intenta_otravz:
 
     Private Sub frmMomitor_Load(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles MyBase.Load
 
+        TimerReconexionCentral.AutoReset = False
+
         Me.Get_IpServidor()
 
         If Me.Conectar_Local() Then
@@ -4495,16 +4547,18 @@ intenta_otravz:
             Me.FTP_USUARIO = tb_cat_consultorio.Rows(0).Item("ftp_usuario").ToString
             Me.FTP_PASSWORD = tb_cat_consultorio.Rows(0).Item("ftp_password").ToString
 
+            Interlocked.Exchange(robotActivo, 1)
             If Me.Conectar_Central(Me.CLUES) Then
                 Me.Text = Me.Text & " " & Application.ProductVersion
                 chkActivar.Checked = True
 
                 'Proceso en segundo plano
                 IniciarProcesosSP()
-
+                Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.AddSeconds(30).Ticks)
             Else
-                chkActivar.Checked = False
-                chkActivar.Enabled = True
+                Me.Text = Me.Text & " " & Application.ProductVersion
+                chkActivar.Checked = True
+                Me.NotificarDesconexionCentral("No fue posible conectar al servidor central al inicio.")
             End If
 
         Else
@@ -4514,6 +4568,7 @@ intenta_otravz:
         End If
 
         load_init = False
+        If Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then TimerReconexionCentral.Start()
 
     End Sub
 
@@ -4550,6 +4605,9 @@ intenta_otravz:
 
     Private Sub MenuCerrar_Click(sender As Object, e As EventArgs) Handles MenuCerrar.Click
 
+        Interlocked.Exchange(cerrandoRobot, 1)
+        Interlocked.Exchange(robotActivo, 0)
+        Me.TimerReconexionCentral.Stop()
         Me.TimerEnlace.Enabled = False
         Me.DetenerProcesoSP()
         Application.ExitThread()
@@ -4565,61 +4623,35 @@ intenta_otravz:
     Private Sub chkActivar_CheckedChanged(sender As Object, e As EventArgs) Handles chkActivar.CheckedChanged
 
         If Me.chkActivar.Checked Then
+            Interlocked.Exchange(robotActivo, 1)
             Me.TimerEnlace.Enabled = True
             If Not load_init Then
+                Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.Ticks)
                 Me.ReiniciarProcesoSP()
+                Me.TimerReconexionCentral.Start()
             End If
 
         Else
+            Interlocked.Exchange(robotActivo, 0)
+            Me.TimerReconexionCentral.Stop()
             Me.TimerEnlace.Enabled = False
             Me.DetenerProcesoSP()
         End If
 
     End Sub
 
-    Private Sub TimerReconect_Tick(sender As Object, e As EventArgs) Handles TimerReconect.Tick
-
+    Private Sub TimerReconexionCentral_Elapsed(sender As Object, e As System.Timers.ElapsedEventArgs) Handles TimerReconexionCentral.Elapsed
         Try
-
-            Exit Sub
-
-            If load_init = True Then
-                Exit Sub
-            End If
-
-            If Me.chkActivar.Checked Then
-                Exit Sub
-            End If
-
-            If Me.Conectar_Local() Then
-
-                Dim tb_cat_consultorio As DataTable
-                tb_cat_consultorio = tb_Recordset_MySQL_local("Select cClues, ftp_usuario, ftp_password, cSiglas from cat_consultorio")
-                Me.CLUES = tb_cat_consultorio.Rows(0).Item("cClues").ToString
-                Me.cSiglas = tb_cat_consultorio.Rows(0).Item("cSiglas").ToString
-
-                Me.FTP_IP = "ftp://" & IpServidor & "/"
-                Me.FTP_USUARIO = tb_cat_consultorio.Rows(0).Item("ftp_usuario").ToString
-                Me.FTP_PASSWORD = tb_cat_consultorio.Rows(0).Item("ftp_password").ToString
-
-                If Me.Conectar_Central(Me.CLUES) Then
-                    Me.Text = Me.Text & " " & Application.ProductVersion
-                    chkActivar.Checked = True
-
-                    'Proceso en segundo plano
-                    IniciarProcesosSP()
-
-                Else
-                    chkActivar.Checked = False
-                    chkActivar.Enabled = True
-                End If
-
-            End If
-
+            If load_init OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 Then Return
+            If CentralDisponible Then ReiniciarProcesoSP()
+            If DateTime.UtcNow.Ticks < Interlocked.Read(proximaComprobacionCentralTicks) Then Return
+            If Interlocked.CompareExchange(comprobacionCentralActiva, 1, 0) <> 0 Then Return
+            RevisarConexionCentral()
         Catch ex As Exception
-            LogEventos.Escribir("TimerReconect_Tick. " & ex.Message)
+            LogEventos.Escribir("[Central] No se pudo comprobar la conexión: " & ex.GetType().Name)
+        Finally
+            If Not load_init AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 AndAlso Interlocked.CompareExchange(cerrandoRobot, 0, 0) = 0 Then TimerReconexionCentral.Start()
         End Try
-
     End Sub
 
 #End Region
@@ -5660,6 +5692,7 @@ no_insertar:
 
 #End Region
 
+  
 End Class
 
 Public Class LogEventos

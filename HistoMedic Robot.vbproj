@@ -52,7 +52,7 @@
     <ProductName>HistoMedic Enlace</ProductName>
     <PublisherName>HistoMedic</PublisherName>
     <SuiteName>HistoMedicApp</SuiteName>
-    <ApplicationRevision>268</ApplicationRevision>
+    <ApplicationRevision>270</ApplicationRevision>
     <ApplicationVersion>2.3.1.%2a</ApplicationVersion>
     <UseApplicationTrust>false</UseApplicationTrust>
     <CreateDesktopShortcut>true</CreateDesktopShortcut>
@@ -246,22 +246,22 @@
   <ItemGroup>
     <PublishFile Include="DevComponents.DotNetBar.Layout">
       <Visible>False</Visible>
+      <PublishState>Include</PublishState>
+      <IncludeHash>True</IncludeHash>
       <Group>
       </Group>
       <TargetPath>
       </TargetPath>
-      <PublishState>Include</PublishState>
-      <IncludeHash>True</IncludeHash>
       <FileType>Assembly</FileType>
     </PublishFile>
     <PublishFile Include="DevComponents.DotNetBar2">
       <Visible>False</Visible>
+      <PublishState>Include</PublishState>
+      <IncludeHash>True</IncludeHash>
       <Group>
       </Group>
       <TargetPath>
       </TargetPath>
-      <PublishState>Include</PublishState>
-      <IncludeHash>True</IncludeHash>
       <FileType>Assembly</FileType>
     </PublishFile>
   </ItemGroup>

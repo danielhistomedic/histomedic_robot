@@ -57,7 +57,6 @@ Partial Class frmInterface
         Me.chkActivar = New DevComponents.DotNetBar.Controls.CheckBoxX()
         Me.Label47 = New System.Windows.Forms.Label()
         Me.txtLimitRegistros = New DevComponents.DotNetBar.Controls.TextBoxX()
-        Me.TimerReconect = New System.Windows.Forms.Timer(Me.components)
         Me.ContextMenuStrip1.SuspendLayout()
         Me.ExpandablePanel2.SuspendLayout()
         CType(Me.PictureBox1, System.ComponentModel.ISupportInitialize).BeginInit()
@@ -433,11 +432,6 @@ Partial Class frmInterface
         Me.txtLimitRegistros.Text = "2000"
         Me.txtLimitRegistros.TextAlign = System.Windows.Forms.HorizontalAlignment.Center
         '
-        'TimerReconect
-        '
-        Me.TimerReconect.Enabled = True
-        Me.TimerReconect.Interval = 5000
-        '
         'frmInterface
         '
         Me.AutoScaleDimensions = New System.Drawing.SizeF(6.0!, 13.0!)
@@ -499,6 +493,5 @@ Partial Class frmInterface
     Friend WithEvents LogdeEnlace As System.Windows.Forms.ColumnHeader
     Friend WithEvents ProgressBarX_SPALM As DevComponents.DotNetBar.Controls.ProgressBarX
     Friend WithEvents ProgressBarX_SP As DevComponents.DotNetBar.Controls.ProgressBarX
-    Friend WithEvents TimerReconect As System.Windows.Forms.Timer
 
 End Class

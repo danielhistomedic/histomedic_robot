@@ -357,44 +357,50 @@ Public Class frmInterface
 
             TimerEnlace.Enabled = False
 
+            '======================================
+            ' Rutinas Importar
+            '======================================
+
+            '- - Importar Cirugía agendada en el portal. - - -
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Try
+                    Me.ImportarCirugiaTemporal()
+                Catch ex As Exception
+                    LogEventos.Escribir("ImportarCirugiaTemporal. " & ex.Message)
+                End Try
+            End If
+
+            '- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - -
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Try
+                    ImportarFirmasRecibido()
+                Catch ex As Exception
+                    LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
+                End Try
+            End If
+
+            '- - Activo Fijo - - - - - - - - - - -
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Try
+                    ImportarFotoActivoFijo()
+                Catch ex As Exception
+                    LogEventos.Escribir("ImportarFotoActivoFijo. " & ex.Message)
+                End Try
+            End If
+
+
             ''======================================
-            '' Rutinas Importar 
+            '' Rutinas Proceso Internos
             ''======================================
 
-            ''- - Importar Cirugía agendada en el portal. - - - 
-            'Try
-            '    Me.ImportarCirugiaTemporal()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ImportarCirugiaTemporal. " & ex.Message)
-            'End Try
+            '- - Notificacions Paquetes - - - - - - - - - - -
+            Try
+                Me.notificarAlertaProductoCantidadFueraPaquete()
+            Catch ex As Exception
+                LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
+            End Try
 
-            ''- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - - 
-            'Try
-            '    ImportarFirmasRecibido()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
-            'End Try
-
-            ''- - Activo Fijo - - - - - - - - - - - 
-            'Try
-            '    ImportarFotoActivoFijo()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ImportarFotoActivoFijo. " & ex.Message)
-            'End Try
-
-
-            ''======================================
-            '' Rutinas Proceso Internos 
-            ''======================================
-
-            ''- - Notificacions Paquetes - - - - - - - - - - - 
-            'Try
-            '    Me.notificarAlertaProductoCantidadFueraPaquete()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
-            'End Try
-
-            '- - Cargar Camas - - - - - - - - - - - 
+            '- - Cargar Camas - - - - - - - - - - -
             Try
                 Me.Cargar_Costo_Dias_Cama_Hosp()
             Catch ex As Exception
@@ -404,54 +410,58 @@ Public Class frmInterface
 
 
             ''======================================
-            '' Rutinas Exportar 
+            '' Rutinas Exportar
             ''======================================
 
             ''== Exportar Tablas de Sistema al Hosting
-            'Try
-            '    Me.ExportarDataToHostingTablasEnlace()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ExportarDataToHostingTablasEnlace. " & ex.Message)
-            'End Try
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Try
+                    Me.ExportarDataToHostingTablasEnlace()
+                Catch ex As Exception
+                    LogEventos.Escribir("ExportarDataToHostingTablasEnlace. " & ex.GetType().Name)
+                End Try
 
-            'Try
-            '    Me.ExportarDataToHostingExpediente()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ExportarDataToHostingExpediente. " & ex.Message)
-            'End Try
+                Try
+                    Me.ExportarDataToHostingExpediente()
+                Catch ex As Exception
+                    LogEventos.Escribir("ExportarDataToHostingExpediente. " & ex.GetType().Name)
+                End Try
 
-            'Try
-            '    Me.ExportarDataToHostingTablasEstudios()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ExportarDataToHostingTablasEstudios. " & ex.Message)
-            'End Try
+                Try
+                    Me.ExportarDataToHostingTablasEstudios()
+                Catch ex As Exception
+                    LogEventos.Escribir("ExportarDataToHostingTablasEstudios. " & ex.GetType().Name)
+                End Try
+            End If
 
 
             '' ======================================
 
-            'Me.ProgressBarX1.Value = 0
+            Me.ProgressBarX1.Value = 0
 
-            ''== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == == 
-            'Try
-            '    If lstLog.Items.Count > 5 Then
-            '        Me.lstLog.Items.Clear()
-            '        Me.DetenerProcesoSP()
-            '        TimerEnlace.Enabled = False
-            '        Application.Restart()
-            '    End If
-            'Catch ex As Exception
-            '    LogEventos.Escribir("Application.Restart. " & ex.Message)
-            'End Try
+            '== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == ==
+            Try
+                If lstLog.Items.Count > 5 Then
+                    Me.lstLog.Items.Clear()
+                    Me.DetenerProcesoSP()
+                    TimerEnlace.Enabled = False
+                    Application.Restart()
+                End If
+            Catch ex As Exception
+                LogEventos.Escribir("Application.Restart. " & ex.Message)
+            End Try
 
-            '' == == == == == == == == == == == == == == == == == == == == == == == == ==
+            ' == == == == == == == == == == == == == == == == == == == == == == == == ==
 
-            '' == Cotinuamente Verificando si la task ya fue terminada
-            'Try
-            '    ReiniciarProcesoSP()
-            'Catch ex As Exception
-            '    LogEventos.Escribir("ReiniciarProcesoSP. " & ex.Message)
-            'End Try
-            '' == == == == == == == == == == == == == == == =
+            ' == Cotinuamente Verificando si la task ya fue terminada
+            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+                Try
+                    ReiniciarProcesoSP()
+                Catch ex As Exception
+                    LogEventos.Escribir("ReiniciarProcesoSP. " & ex.Message)
+                End Try
+            End If
+            ' == == == == == == == == == == == == == == == =
 
             TimerEnlace.Enabled = True
 
@@ -1613,6 +1623,7 @@ Public Class frmInterface
 
 
     Private Sub ExportarDataToHostingTablasEnlace()
+        If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
         Try
 
@@ -1658,6 +1669,7 @@ Public Class frmInterface
             Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
+                If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
                 longblob_filed_contain = False
 
@@ -1952,6 +1964,7 @@ Public Class frmInterface
     End Sub
 
     Private Sub ExportarDataToHostingTablasEstudios()
+        If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
         Try
 
@@ -1997,6 +2010,7 @@ Public Class frmInterface
             Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
+                If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
                 longblob_filed_contain = False
 
@@ -2286,6 +2300,7 @@ Public Class frmInterface
     End Sub
 
     Private Sub ExportarDataToHostingExpediente()
+        If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
         Try
 
@@ -2331,6 +2346,7 @@ Public Class frmInterface
             Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
+                If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
                 longblob_filed_contain = False
 

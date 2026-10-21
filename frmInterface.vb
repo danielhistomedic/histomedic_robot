@@ -434,24 +434,21 @@ Public Class frmInterface
                 End Try
             End If
 
-
-            '' ======================================
-
+            ' == == == == == == == == == == == == == == == =
             Me.ProgressBarX1.Value = 0
 
-            '== Reinicia la aplicacion si el log, tiene mas de 5 registros.  == == == ==
+
+            ' ======================================
+            ' Gestión de memoria del log en pantalla (mantener historial limpio sin reiniciar app)
+            ' ======================================
             Try
-                If lstLog.Items.Count > 5 Then
-                    Me.lstLog.Items.Clear()
-                    Me.DetenerProcesoSP()
-                    TimerEnlace.Enabled = False
-                    Application.Restart()
+                If lstLog.Items.Count > 100 Then
+                    While lstLog.Items.Count > 50
+                        lstLog.Items.RemoveAt(0)
+                    End While
                 End If
             Catch ex As Exception
-                LogEventos.Escribir("Application.Restart. " & ex.Message)
             End Try
-
-            ' == == == == == == == == == == == == == == == == == == == == == == == == ==
 
             ' == Cotinuamente Verificando si la task ya fue terminada
             If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then

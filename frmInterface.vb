@@ -434,7 +434,6 @@ Public Class frmInterface
                 End Try
             End If
 
-            ' == == == == == == == == == == == == == == == =
             Me.ProgressBarX1.Value = 0
 
 

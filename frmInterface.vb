@@ -109,27 +109,6 @@ Public Class frmInterface
             Dim Uid As String = ""
             Dim Pwd As String = ""
 
-            'tb_ClienteData = getClienteData(clues)
-
-            'If tb_ClienteData.Rows.Count > 0 Then
-
-            '    Try
-            '        Dim valida As Integer = 0
-            '        valida = tb_ClienteData.Rows.Count
-            '        Database = tb_ClienteData.Rows(0).Item("db_name").ToString
-            '        Uid = tb_ClienteData.Rows(0).Item("db_user").ToString
-            '        Pwd = tb_ClienteData.Rows(0).Item("db_pass").ToString
-            '    Catch ex As Exception
-            '        AgregarLog(500, ex.Message & ". Equipo No Compatible con WebRequest ")
-            '        'Me.lstLog.Items.Add(Calcula_FechaActual.ToString)
-            '        'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(ex.Message & ". Equipo No Compatible con WebRequest ")
-            '        Return False
-            '    End Try
-            'Else
-            '    AgregarLog(500, ". Equipo No Compatible con WebRequest ")
-            'End If
-          
-            '                                      Server=localhost;    Database=tu_base;Uid=tu_usuario;Pwd=tu_password;
             ' ==================================================================================================================================
             Dim cadena_conexion_admin As String = "Server=histomedic.mx;Database=mirtheda_admin;Uid=mirtheda_root;Pwd=Bsapmd2cKb*5;SSL Mode=None;"
             If cx_MySQL_Admin.State = ConnectionState.Closed Then
@@ -147,12 +126,6 @@ Public Class frmInterface
             Database = tb_ClienteData.Rows(0).Item("db_name").ToString
             Uid = tb_ClienteData.Rows(0).Item("db_user").ToString
             Pwd = tb_ClienteData.Rows(0).Item("db_pass").ToString
-
-            'If tb_ClienteData.Rows(0).Item("actualizaciones").ToString <> "SI" Then
-            '    AgregarLog(500, "No Disponible para actualizaciones. ")
-            '    Return False
-            'End If
-
             ' ==================================================================================================================================
 
             If cx_MySQL_Central.State = ConnectionState.Open Then
@@ -173,10 +146,7 @@ Public Class frmInterface
             End If
 
         Catch ex As Exception
-
             AgregarLog(500, ex.Message & ". Equipo No Compatible con WebRequest ")
-            'Me.lstLog.Items.Add(Calcula_FechaActual.ToString)
-            'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(ex.Message & ". Equipo No Compatible con WebRequest ")
             Return False
         End Try
 
@@ -4530,7 +4500,7 @@ intenta_otravz:
                 chkActivar.Checked = True
 
                 'Proceso en segundo plano
-                'IniciarProcesosSP()
+                IniciarProcesosSP()
 
             Else
                 chkActivar.Checked = False

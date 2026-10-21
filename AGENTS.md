@@ -4,7 +4,7 @@
 
 Antes de trabajar, lee y aplica estos archivos, migrados de las reglas `always_on` de Antigravity:
 
-- [Controles de formularios](.agents/rules/controlesforms.md).
+- [Controles de formularios](.agents/rules/estandarizacion-formularios.md).
 - [Acceso a la base de datos local](.agents/rules/accesobasedatos.md).
 
 Ambas reglas se aplican a todo el repositorio, cada una a las operaciones que describe. Los datos de conexión permanecen en su archivo original: no copies contraseñas a código nuevo, respuestas ni registros.
@@ -27,7 +27,7 @@ Los perfiles conservan sus instrucciones originales en `instructions.md`. La car
 
 - Las menciones a «LFM Control» describen el contexto heredado de los perfiles; aplícalas a este proyecto HistoMedic sin renombrar productos, clases o interfaces por ese motivo.
 - Conserva la compatibilidad requerida por los perfiles con Visual Studio 2013 y .NET Framework 4.5. Verifica los proyectos y dependencias antes de introducir cambios.
-- Las referencias a `controlesforms.md` corresponden a `.agents/rules/controlesforms.md` desde la raíz del repositorio.
+- Las referencias a `estandarizacion-formularios.md` corresponden a `.agents/rules/estandarizacion-formularios.md` desde la raíz del repositorio.
 - Los agentes especializados describen responsabilidades. Aplica las skills correspondientes; si no hay delegación disponible o autorizada, realiza sus fases secuencialmente. No presupongas que existen herramientas o agentes PHP/API por estar mencionados en el texto.
 - Las instrucciones del usuario y las autorizaciones de la sesión tienen prioridad sobre las convenciones heredadas. Ajusta el detalle de planes e informes al alcance de la tarea.
 

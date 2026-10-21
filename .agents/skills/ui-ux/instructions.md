@@ -73,7 +73,7 @@ Crear jerarquía mediante:
 
 # DISEÑO DE FORMULARIOS
 
-Sigue las reglas del archivo controlesforms.md
+Sigue las reglas del archivo estandarizacion-formularios.md
 Toma como referencia el disñeo de formularios como: frmOrdenCompraProveedor.vb o frmVentasCotizacionesClientes.vb
 
 # CONTROLES
@@ -207,7 +207,7 @@ Importe      5,250.00
 
 Alinear números de manera consistente.
 
-Sigue las reglas del archivo controlesforms.md
+Sigue las reglas del archivo estandarizacion-formularios.md
 
 ---
 

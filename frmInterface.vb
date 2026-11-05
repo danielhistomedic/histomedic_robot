@@ -400,12 +400,6 @@ Public Class frmInterface
                 LogEventos.Escribir("notificarAlertaProductoCantidadFueraPaquete. " & ex.Message)
             End Try
 
-            '- - Cargar Camas - - - - - - - - - - -
-            Try
-                Me.Cargar_Costo_Dias_Cama_Hosp()
-            Catch ex As Exception
-                LogEventos.Escribir("Cargar_Costo_Dias_Cama_Hosp. " & ex.GetType().Name)
-            End Try
 
 
 
@@ -5114,110 +5108,6 @@ no_insertar:
         Return "pza"
 
     End Function
-
-#End Region
-
-#Region "Cargar Camas"
-
-    Private cargosCamaActivos As Integer = 0
-    Private ReadOnly relojCargosCama As New System.Diagnostics.Stopwatch()
-    Private siguienteRevisionCamas As Long = 300000L
-
-    ''' <summary>
-    ''' Programa los cargos cada cinco minutos sin cambiar el Timer compartido.
-    ''' Usa una copia de la conexión local del Robot para no compartir conexiones activas entre hilos.
-    ''' </summary>
-    Private Sub Cargar_Costo_Dias_Cama_Hosp()
-        If Not relojCargosCama.IsRunning Then
-            relojCargosCama.Start()
-            Return
-        End If
-        If relojCargosCama.ElapsedMilliseconds < siguienteRevisionCamas Then Return
-        If Interlocked.CompareExchange(cargosCamaActivos, 1, 0) <> 0 Then Return
-        siguienteRevisionCamas = relojCargosCama.ElapsedMilliseconds + 300000L
-        Dim conexionCamas As MySqlConnector.MySqlConnection = Nothing
-        Try
-            Dim configuracion As String = Funciones.getValorConfiguracion("ACTIVAR_REGISTRO_AUTOMATICO_CAMAS")
-            If Not String.Equals(configuracion, "1", StringComparison.Ordinal) Then
-                RegistrarLogCamas("Camas: configuración deshabilitada o inválida; ejecución omitida.")
-                Interlocked.Exchange(cargosCamaActivos, 0)
-                Return
-            End If
-            ' Reutilizar la configuración actual sin nuevos servidores, credenciales ni referencias externas.
-            conexionCamas = DirectCast(Me.cx_MySQL_local.Clone(), MySqlConnector.MySqlConnection)
-            Dim servicio As New HisCargosHospitalizacionAutomaticos(conexionCamas, Me.CLUES,
-                AddressOf BuscarCuentaCamas, AddressOf ObtenerIngresoCamas, AddressOf RegistrarLogCamas,
-                AddressOf RecalcularTotalesCamas)
-            Dim conexionTrabajo As MySqlConnector.MySqlConnection = conexionCamas
-            Task.Run(Sub()
-                         Try
-                             servicio.Ejecutar()
-                         Catch ex As Exception
-                             RegistrarLogCamas("Camas: ejecución omitida (" & ex.GetType().Name &
-                                               "). Revisar tablas auxiliares, índices y conexión en desarrollo.")
-                         Finally
-                             Try
-                                 conexionTrabajo.Dispose()
-                             Catch ex As Exception
-                                 RegistrarLogCamas("Camas: error al liberar la conexión local (" & ex.GetType().Name & ").")
-                             Finally
-                                 Interlocked.Exchange(cargosCamaActivos, 0)
-                             End Try
-                         End Try
-                     End Sub)
-        Catch ex As Exception
-            Try
-                If conexionCamas IsNot Nothing Then conexionCamas.Dispose()
-            Catch exLiberacion As Exception
-                System.Diagnostics.Trace.WriteLine("Camas: no se pudo liberar la conexión local (" & exLiberacion.GetType().Name & ").")
-            Finally
-                Interlocked.Exchange(cargosCamaActivos, 0)
-            End Try
-            RegistrarLogCamas("Camas: no se pudo iniciar la ejecución (" & ex.GetType().Name & ").")
-        End Try
-    End Sub
-
-    ''' <summary>Mantiene NumCuentaPaciente intacta y ejecuta su acceso heredado en el hilo del formulario.</summary>
-    Private Function BuscarCuentaCamas(ByVal paciente As String, ByVal cama As Integer) As String
-        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
-        If Me.InvokeRequired Then
-            Return CStr(Me.Invoke(New Func(Of String, Integer, String)(AddressOf BuscarCuentaCamas), paciente, cama))
-        End If
-        Return Me.NumCuentaPaciente(paciente, cama)
-    End Function
-
-    ''' <summary>Reutiliza Get_FechaHoraIngresoHospitalario sin cambiar su implementación ni sus conexiones globales.</summary>
-    Private Function ObtenerIngresoCamas(ByVal paciente As String, ByVal recepcion As Integer) As DateTime
-        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
-        If Me.InvokeRequired Then
-            Return CDate(Me.Invoke(New Func(Of String, Integer, DateTime)(AddressOf ObtenerIngresoCamas), paciente, recepcion))
-        End If
-        Return Funciones.Get_FechaHoraIngresoHospitalario(paciente, recepcion)
-    End Function
-
-    ''' <summary>Recalcula una vez por cuenta al finalizar el recorrido de inserciones, en el hilo de los accesos globales.</summary>
-    Private Sub RecalcularTotalesCamas(ByVal numeroCuenta As String)
-        If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Throw New InvalidOperationException("Formulario no disponible.")
-        If Me.InvokeRequired Then
-            Me.Invoke(New Action(Of String)(AddressOf RecalcularTotalesCamas), numeroCuenta)
-            Return
-        End If
-        Funciones.RecalcularTotales(numeroCuenta)
-    End Sub
-
-    Private Sub RegistrarLogCamas(ByVal mensaje As String)
-        System.Diagnostics.Trace.WriteLine(mensaje)
-        Try
-            If Me.IsDisposed OrElse Me.Disposing OrElse Not Me.IsHandleCreated Then Return
-            If Me.InvokeRequired Then
-                Me.BeginInvoke(New Action(Of String)(AddressOf RegistrarLogCamas), mensaje)
-            Else
-                LogEventos.Escribir(mensaje)
-            End If
-        Catch ex As InvalidOperationException
-            System.Diagnostics.Trace.WriteLine("Camas: formulario cerrado durante el diagnóstico.")
-        End Try
-    End Sub
 
 #End Region
 

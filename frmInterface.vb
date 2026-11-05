@@ -449,16 +449,6 @@ Public Class frmInterface
             Catch ex As Exception
             End Try
 
-            ' == Cotinuamente Verificando si la task ya fue terminada
-            If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
-                Try
-                    ReiniciarProcesoSP()
-                Catch ex As Exception
-                    LogEventos.Escribir("ReiniciarProcesoSP. " & ex.Message)
-                End Try
-            End If
-            ' == == == == == == == == == == == == == == == =
-
             TimerEnlace.Enabled = True
 
         Catch ex As Exception

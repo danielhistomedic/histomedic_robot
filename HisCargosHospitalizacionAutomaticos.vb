@@ -157,9 +157,12 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                     Continue For
                 End If
                 Dim partes As List(Of Parte) = PrepararPartes(numero, clavePaciente, material)
-                RegistrarPeriodo(idIngreso, idCuenta, numero, periodo, ingreso, recepcion,
-                                 clavePaciente, cama, Texto(paciente, "cdscareaafectada"), material, partes)
-                nuevos += 1
+                If RegistrarPeriodo(idIngreso, idCuenta, numero, periodo, ingreso, recepcion,
+                                    clavePaciente, cama, Texto(paciente, "cdscareaafectada"), material, partes) Then
+                    nuevos += 1
+                Else
+                    existentes += 1
+                End If
             Next
             log(String.Format(CultureInfo.InvariantCulture,
                 "Camas: ingreso {0}; periodos={1}; existentes={2}; nuevos={3}.", recepcion, facturables, existentes, nuevos))
@@ -200,27 +203,50 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
         Return False
     End Function
 
-    ''' <summary>Valida la fecha devuelta por la función existente y fija la recepción que origina ese primer ingreso.</summary>
+    ''' <summary>Conserva el primer ingreso de la estancia actual; un traslado no reinicia las 24 horas.</summary>
     Private Function ValidarIngreso(ByVal paciente As String, ByVal recepcion As Integer,
-                                    ByVal ingreso As DateTime, ByVal ahora As DateTime) As Integer
-        If ingreso = DateTime.MinValue OrElse ingreso > ahora Then Throw New InvalidOperationException("Fecha de ingreso inválida.")
-        Dim id As Integer = Integer.MaxValue
+                                    ByRef ingreso As DateTime, ByVal ahora As DateTime) As Integer
         Using fechas As DataTable = leer(
-            "SELECT r.Id,r.fchhorarecepcion FROM tb_urg_recepcion r INNER JOIN cat_servicios s " &
+            "SELECT r.Id,r.fchhorarecepcion,s.cdscareaafectada AS area " &
+            "FROM tb_urg_recepcion r INNER JOIN cat_servicios s " &
             "ON s.cdscservicio=r.cdscareaafectada WHERE r.ccvepaciente=@paciente " &
-            "AND s.cdscareaafectada IN ('HOSPITALIZACION','URGENCIAS')", P("@paciente", paciente))
+            "AND (s.cdscareaafectada IN ('HOSPITALIZACION','URGENCIAS') " &
+            "OR s.cdscservicio IN ('QUIROFANO','UTQ','RECUPERACION')) " &
+            "ORDER BY r.fchhorarecepcion,r.Id", P("@paciente", paciente))
+            Dim vigente As DataRow = Nothing
             For Each fila As DataRow In fechas.Rows
-                If fila.IsNull("fchhorarecepcion") Then Continue For
-                Dim referencia As DateTime = CDate(fila("fchhorarecepcion"))
-                referencia = referencia.AddTicks(-(referencia.Ticks Mod TimeSpan.TicksPerMinute))
-                If referencia = ingreso Then id = Math.Min(id, Entero(fila, "Id"))
+                If Entero(fila, "Id") <> recepcion Then Continue For
+                If vigente IsNot Nothing Then Throw New InvalidOperationException("Recepción vigente ambigua.")
+                vigente = fila
             Next
+            If vigente Is Nothing OrElse vigente.IsNull("fchhorarecepcion") Then Throw New InvalidOperationException("No se pudo identificar la recepción vigente.")
+            Dim fechaVigente As DateTime = CDate(vigente("fchhorarecepcion"))
+            If fechaVigente = DateTime.MinValue OrElse fechaVigente > ahora Then Throw New InvalidOperationException("Fecha de ingreso inválida.")
+
+            Dim ultimoEgreso As DateTime = DateTime.MinValue
+            Using egresos As DataTable = leer("SELECT id,id_recepcion,fchEgresa FROM tb_notamedica_egreso WHERE ccvepaciente=@paciente", P("@paciente", paciente))
+                For Each fila As DataRow In egresos.Rows
+                    If Entero(fila, "id_recepcion") = recepcion Then Throw New InvalidOperationException("El ingreso tiene nota de egreso.")
+                    If fila.IsNull("fchEgresa") Then Throw New InvalidOperationException("Egreso sin fecha; no se puede separar la estancia actual.")
+                    Dim egreso As DateTime = CDate(fila("fchEgresa"))
+                    If egreso >= fechaVigente Then Throw New InvalidOperationException("Egreso posterior al ingreso vigente; requiere revisión.")
+                    If egreso > ultimoEgreso Then ultimoEgreso = egreso
+                Next
+            End Using
+
+            Dim inicial As DataRow = Nothing
+            For Each fila As DataRow In fechas.Select("", "fchhorarecepcion ASC, Id ASC")
+                If fila.IsNull("fchhorarecepcion") Then Throw New InvalidOperationException("Movimiento sin fecha de ingreso.")
+                Dim fecha As DateTime = CDate(fila("fchhorarecepcion"))
+                If fecha <= ultimoEgreso Then Continue For
+                If fecha > fechaVigente OrElse (fecha = fechaVigente AndAlso Entero(fila, "Id") > recepcion) Then Exit For
+                ' Solo el egreso clínico separa estancias; los traslados y su duración no reinician la fecha.
+                If inicial Is Nothing AndAlso (Texto(fila, "area") = "URGENCIAS" OrElse Texto(fila, "area") = "HOSPITALIZACION") Then inicial = fila
+            Next
+            If inicial Is Nothing Then Throw New InvalidOperationException("No se encontró el inicio de la estancia actual.")
+            ingreso = CDate(inicial("fchhorarecepcion"))
+            Return Entero(inicial, "Id")
         End Using
-        If id = Integer.MaxValue Then Throw New InvalidOperationException("La fecha devuelta no corresponde a un ingreso verificable.")
-        Using egresos As DataTable = leer("SELECT id FROM tb_notamedica_egreso WHERE ccvepaciente=@paciente AND id_recepcion=@recepcion LIMIT 1", P("@paciente", paciente, "@recepcion", recepcion))
-            If egresos.Rows.Count > 0 Then Throw New InvalidOperationException("El ingreso tiene nota de egreso.")
-        End Using
-        Return id
     End Function
 
     ''' <summary>Un periodo en proceso o un vínculo incompleto es una operación incierta: no se cobra de nuevo.</summary>
@@ -231,13 +257,25 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
         Using periodos As DataTable = leer("SELECT id,id_ingreso,id_cuenta,periodo,fecha_ingreso,numero_cuenta,id_cama,material,partes,estado FROM robot_camas_periodos WHERE id_cuenta=@cuenta OR numero_cuenta=@numero", P("@cuenta", cuenta, "@numero", numero))
             For Each fila As DataRow In periodos.Rows
                 If Entero(fila, "id_ingreso") <> ingreso OrElse Entero(fila, "id_cuenta") <> cuenta OrElse
-                    Texto(fila, "numero_cuenta") <> numero OrElse CDate(fila("fecha_ingreso")) <> fecha Then
+                    Texto(fila, "numero_cuenta") <> numero Then
                     Throw New InvalidOperationException("La cuenta contiene un control de otro ingreso; requiere conciliación.")
+                End If
+                Dim fechaControl As DateTime = CDate(fila("fecha_ingreso"))
+                Dim fechaSinSegundos As DateTime = fecha.AddTicks(-(fecha.Ticks Mod TimeSpan.TicksPerMinute))
+                If fechaControl <> fecha AndAlso fechaControl <> fechaSinSegundos Then
+                    Throw New InvalidOperationException("La cuenta contiene un control con otra fecha de ingreso; requiere conciliación.")
                 End If
                 If Texto(fila, "estado") <> "COMPLETO" AndAlso Texto(fila, "estado") <> "EN_PROCESO" Then
                     Throw New InvalidOperationException("Estado de control desconocido; requiere revisión.")
                 End If
                 VerificarVinculos(fila)
+                ' La función heredada descartaba segundos. Corregir solo esa pérdida conocida, sin cambiar cargos ni periodos.
+                If fechaControl <> fecha Then
+                    If ejecutarSql("UPDATE robot_camas_periodos SET fecha_ingreso=@fecha WHERE id=@id AND fecha_ingreso=@anterior",
+                                   P("@fecha", fecha, "@id", CLng(fila("id")), "@anterior", fechaControl)) <> 1 Then
+                        Throw New InvalidOperationException("No se pudo confirmar la precisión de la fecha del periodo; no recobrar.")
+                    End If
+                End If
                 ' Tras un corte posterior al último vínculo, es seguro confirmar lo ya existente.
                 ' Si falta un vínculo, VerificarVinculos detiene la cuenta: nunca insertar para completarlo.
                 If Texto(fila, "estado") = "EN_PROCESO" Then
@@ -249,16 +287,75 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                 If periodo <= 0 OrElse Not resultado.Add(periodo) Then Throw New InvalidOperationException("Control de periodos inconsistente.")
             Next
         End Using
-        ' No asignar periodos a cargos heredados por su fecha ni por su material.
-        Using anteriores As DataTable = leer(
-            "SELECT d.icveticketecdetalle FROM tb_ticketsec_detalle d LEFT JOIN robot_camas_detalles a " &
-            "ON a.id_cargo=d.icveticketecdetalle WHERE (d.icveticketec=@cuenta OR d.cNumTicketEC=@numero) " &
-            "AND d.ccveusuario='servidor_his' AND a.id_cargo IS NULL LIMIT 1", P("@cuenta", cuenta, "@numero", numero))
-            If anteriores.Rows.Count > 0 Then Throw New InvalidOperationException("Cargos heredados sin periodo; requieren conciliación, no recobro.")
-        End Using
+        ConciliarCargosPrevios(ingreso, cuenta, numero, fecha, resultado)
         Trace.WriteLine("Camas: validación cargos ms=" & reloj.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture))
         Return resultado
     End Function
+
+    ''' <summary>Reconoce cargos de cualquier usuario sin volver a insertarlos ni modificar sus importes.</summary>
+    Private Sub ConciliarCargosPrevios(ByVal ingreso As Integer, ByVal cuenta As Integer, ByVal numeroCuenta As String,
+                                      ByVal fecha As DateTime, ByVal cobrados As HashSet(Of Integer))
+        Using cargos As DataTable = leer(
+            "SELECT d.icveticketecdetalle,d.icveticketec,d.cNumTicketEC,d.icvecama,d.ccvematerial," &
+            "d.iCantidad,d.iPrecioVenta,d.iCubreSP,d.fchregistro," &
+            "EXISTS(SELECT 1 FROM cat_camas c WHERE c.ccvematerial=d.ccvematerial) AS material_cama " &
+            "FROM tb_ticketsec_detalle d " &
+            "LEFT JOIN robot_camas_detalles a ON a.id_cargo=d.icveticketecdetalle " &
+            "WHERE (d.icveticketec=@cuenta OR d.cNumTicketEC=@numero) AND a.id_cargo IS NULL " &
+            "AND (d.icvecama>0 OR EXISTS(SELECT 1 FROM cat_camas c WHERE c.ccvematerial=d.ccvematerial)) " &
+            "ORDER BY d.fchregistro,d.icveticketecdetalle", P("@cuenta", cuenta, "@numero", numeroCuenta))
+            Dim grupos As New SortedDictionary(Of Integer, List(Of DataRow))()
+            For Each fila As DataRow In cargos.Rows
+                If Entero(fila, "icveticketec") <> cuenta OrElse Texto(fila, "cNumTicketEC") <> numeroCuenta OrElse fila.IsNull("fchregistro") Then
+                    Throw New InvalidOperationException("Cargo previo sin cuenta o fecha inequívoca; requiere conciliación.")
+                End If
+                Dim registro As DateTime = CDate(fila("fchregistro"))
+                If registro < fecha OrElse registro > DateTime.Now Then Throw New InvalidOperationException("Cargo de cama fuera de la estancia actual; requiere conciliación.")
+                Dim periodo As Integer = HisPeriodosCama.Total(fecha, registro)
+                If Not grupos.ContainsKey(periodo) Then grupos.Add(periodo, New List(Of DataRow)())
+                grupos(periodo).Add(fila)
+            Next
+            For Each grupo As KeyValuePair(Of Integer, List(Of DataRow)) In grupos
+                If cobrados.Contains(grupo.Key) Then Throw New InvalidOperationException("Hay cargos adicionales para un periodo ya cubierto; no generar más cargos.")
+                For anterior As Integer = 1 To grupo.Key - 1
+                    If Not cobrados.Contains(anterior) Then Throw New InvalidOperationException("Cargo previo con periodos anteriores sin identificar; requiere conciliación, no recobro.")
+                Next
+                If grupo.Value.Count > 2 Then Throw New InvalidOperationException("Cargo previo con más de dos fragmentos; requiere conciliación.")
+                Dim base As DataRow = grupo.Value(0)
+                Dim cantidad As Double = 0
+                For Each fila As DataRow In grupo.Value
+                    If Entero(fila, "material_cama") <> 1 OrElse CLng(fila("icveticketecdetalle")) <= 0 OrElse
+                        Entero(fila, "icvecama") < 0 OrElse Numero(fila, "iPrecioVenta") < 0 OrElse Entero(fila, "iCubreSP") < 0 Then
+                        Throw New InvalidOperationException("Cargo previo de cama sin datos válidos; requiere conciliación.")
+                    End If
+                    If Entero(fila, "icvecama") <> Entero(base, "icvecama") OrElse Texto(fila, "ccvematerial") <> Texto(base, "ccvematerial") Then
+                        Throw New InvalidOperationException("Más de una cama o material en el mismo periodo; requiere conciliación.")
+                    End If
+                    Dim parte As Double = Numero(fila, "iCantidad")
+                    If parte <= 0 Then Throw New InvalidOperationException("Cargo previo con cantidad no positiva; requiere conciliación.")
+                    cantidad += parte
+                Next
+                If Math.Abs(cantidad - 1) > 0.00000001 Then Throw New InvalidOperationException("Cantidad de cama previa distinta de un día; requiere conciliación.")
+                Dim id As Long = insertar(
+                    "INSERT INTO robot_camas_periodos (id_ingreso,id_cuenta,periodo,fecha_ingreso,numero_cuenta,id_cama,material,partes,estado,fecha_inicio) " &
+                    "VALUES (@ingreso,@cuenta,@periodo,@fecha,@numero,@cama,@material,@partes,'EN_PROCESO',CURRENT_TIMESTAMP)",
+                    P("@ingreso", ingreso, "@cuenta", cuenta, "@periodo", grupo.Key, "@fecha", fecha, "@numero", numeroCuenta,
+                      "@cama", Entero(base, "icvecama"), "@material", Texto(base, "ccvematerial"), "@partes", grupo.Value.Count))
+                If id <= 0 Then Throw New InvalidOperationException("No se confirmó el vínculo del cargo previo; no volver a cobrar.")
+                For i As Integer = 0 To grupo.Value.Count - 1
+                    Dim fila As DataRow = grupo.Value(i)
+                    If ejecutarSql("INSERT INTO robot_camas_detalles (id_periodo,parte,cantidad,precio,paquete,id_cargo) VALUES (@id,@parte,@cantidad,@precio,@paquete,@cargo)",
+                                   P("@id", id, "@parte", i + 1, "@cantidad", Numero(fila, "iCantidad"), "@precio", Numero(fila, "iPrecioVenta"),
+                                     "@paquete", Entero(fila, "iCubreSP"), "@cargo", CLng(fila("icveticketecdetalle")))) <> 1 Then
+                        Throw New InvalidOperationException("Vínculo incompleto del cargo previo; requiere conciliación sin recobro.")
+                    End If
+                Next
+                ConfirmarPeriodo(id)
+                cobrados.Add(grupo.Key)
+                log("Camas: cargo previo reconocido sin nuevo cobro; periodo=" & grupo.Key.ToString(CultureInfo.InvariantCulture))
+            Next
+        End Using
+    End Sub
 
     Private Sub VerificarVinculos(ByVal periodo As DataRow)
         Using detalles As DataTable = leer(
@@ -275,7 +372,7 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                     Texto(fila, "ccvematerial") <> Texto(periodo, "material") OrElse
                     Math.Abs(Numero(fila, "iCantidad") - Numero(fila, "cantidad")) > 0.00000001 OrElse
                     Math.Abs(Numero(fila, "iPrecioVenta") - Numero(fila, "precio")) > 0.00000001 OrElse
-                    Entero(fila, "iCubreSP") <> Entero(fila, "paquete") OrElse Texto(fila, "ccveusuario") <> "servidor_his" Then
+                    Entero(fila, "iCubreSP") <> Entero(fila, "paquete") Then
                     Throw New InvalidOperationException("Un cargo vinculado falta o difiere del control; no se vuelve a cobrar.")
                 End If
                 partes.Add(Entero(fila, "parte"))
@@ -394,10 +491,10 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
 
 #Region "Registro de cargos"
     ''' <summary>Registra el inicio antes de cobrar. El control persiste tras errores y reinicios y nunca se retoma para insertar cargos automáticamente.</summary>
-    Private Sub RegistrarPeriodo(ByVal ingresoId As Integer, ByVal cuentaId As Integer, ByVal cuenta As String,
+    Private Function RegistrarPeriodo(ByVal ingresoId As Integer, ByVal cuentaId As Integer, ByVal cuenta As String,
                                  ByVal periodo As Integer, ByVal ingreso As DateTime, ByVal recepcion As Integer,
                                  ByVal paciente As String, ByVal cama As Integer, ByVal servicio As String,
-                                 ByVal material As DataRow, ByVal partes As List(Of Parte))
+                                 ByVal material As DataRow, ByVal partes As List(Of Parte)) As Boolean
         Dim clave As String = Texto(material, "ccvematerial")
         Dim publico As Double = Numero(material, "iPrecioPublicoOficial")
         Dim oficial As Integer = Entero(material, "iSujetoCatalogoOficial")
@@ -415,6 +512,8 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
         Dim unidad As String = Texto(material, "ccveunidad")
         If String.IsNullOrWhiteSpace(unidad) Then unidad = "ser"
         ValidarVigencia(recepcion, paciente, cama, cuenta)
+        ' Volver a consultar cargos manuales que pudieron aparecer después del recorrido inicial.
+        If LeerPeriodos(ingresoId, cuentaId, cuenta, ingreso).Contains(periodo) Then Return False
         Using previo As DataTable = leer("SELECT id FROM robot_camas_periodos WHERE id_ingreso=@ingreso AND id_cuenta=@cuenta AND periodo=@periodo LIMIT 1", P("@ingreso", ingresoId, "@cuenta", cuentaId, "@periodo", periodo))
             If previo.Rows.Count > 0 Then Throw New InvalidOperationException("El periodo ya tiene un registro de inicio; no insertar cargos.")
         End Using
@@ -450,15 +549,27 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
                 "FROM tb_urg_recepcion r INNER JOIN tb_ticketsec e ON e.ccvepaciente=r.ccvepaciente " &
                 "INNER JOIN cat_camas c ON c.icvecama=r.icvecama " &
                 "INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+                "LEFT JOIN tb_ticketsec_detalle previo ON (previo.icveticketec=@id OR previo.cNumTicketEC=@cuenta) " &
+                "LEFT JOIN robot_camas_detalles vinculo ON vinculo.id_cargo=previo.icveticketecdetalle " &
+                "LEFT JOIN cat_camas cama_previa ON cama_previa.ccvematerial=previo.ccvematerial " &
                 "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente " &
                 "AND r.iegresado=0 AND r.icvecama=@cama AND c.ccvematerial=@material AND e.icveticketec=@id " &
-                "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' AND " & FiltroIngresoFacturable, valores)
+                "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' " &
+                "AND NOT EXISTS(SELECT 1 FROM tb_notamedica_egreso eg WHERE eg.ccvepaciente=@paciente AND eg.id_recepcion=@recepcion) AND " & FiltroIngresoFacturable &
+                " GROUP BY r.Id HAVING SUM(CASE WHEN previo.icveticketecdetalle IS NOT NULL AND vinculo.id_cargo IS NULL " &
+                "AND (previo.icvecama>0 OR cama_previa.icvecama IS NOT NULL) THEN 1 ELSE 0 END)=0", valores)
             If cargo <= 0 Then Throw New InvalidOperationException("Cargo no confirmado. Revisar el periodo en proceso sin recobrar.")
             If ejecutarSql("UPDATE robot_camas_detalles SET id_cargo=@cargo WHERE id_periodo=@id AND parte=@parte AND id_cargo IS NULL",
                            P("@cargo", cargo, "@id", idControl, "@parte", i + 1)) <> 1 Then
                 Throw New InvalidOperationException("Cargo insertado sin confirmación del vínculo; no volver a cobrar.")
             End If
         Next
+        ConfirmarPeriodo(idControl)
+        NotificarExcedentes(paciente, clave, Texto(material, "cDescripcion").Trim(), unidad, partes)
+        Return True
+    End Function
+
+    Private Sub ConfirmarPeriodo(ByVal idControl As Long)
         Using control As DataTable = leer("SELECT id,id_cuenta,numero_cuenta,id_cama,material,partes FROM robot_camas_periodos WHERE id=@id", P("@id", idControl))
             If control.Rows.Count <> 1 Then Throw New InvalidOperationException("No se puede confirmar el periodo en proceso.")
             VerificarVinculos(control.Rows(0))
@@ -466,14 +577,14 @@ Friend NotInheritable Class HisCargosHospitalizacionAutomaticos
         If ejecutarSql("UPDATE robot_camas_periodos SET estado='COMPLETO',fecha_confirmacion=CURRENT_TIMESTAMP WHERE id=@id AND estado='EN_PROCESO'", P("@id", idControl)) <> 1 Then
             Throw New InvalidOperationException("Confirmación incierta del periodo; conservar el periodo en proceso sin reintentos.")
         End If
-        NotificarExcedentes(paciente, clave, Texto(material, "cDescripcion").Trim(), unidad, partes)
     End Sub
 
     Private Sub ValidarVigencia(ByVal recepcion As Integer, ByVal paciente As String, ByVal cama As Integer, ByVal cuenta As String)
         Using tabla As DataTable = leer("SELECT r.Id FROM tb_urg_recepcion r INNER JOIN tb_ticketsec e ON e.ccvepaciente=r.ccvepaciente " &
             "INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
             "WHERE r.Id=@id AND r.ccvepaciente=@paciente AND r.iegresado=0 AND r.icvecama=@cama " &
-            "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' AND " & FiltroIngresoFacturable,
+            "AND e.cNumTicketec=@cuenta AND e.cEstatus='ABIERTO' " &
+            "AND NOT EXISTS(SELECT 1 FROM tb_notamedica_egreso eg WHERE eg.ccvepaciente=@paciente AND eg.id_recepcion=@id) AND " & FiltroIngresoFacturable,
             P("@id", recepcion, "@paciente", paciente, "@cama", cama, "@cuenta", cuenta))
             If tabla.Rows.Count <> 1 Then Throw New InvalidOperationException("El ingreso ya no cumple el área o permanencia requerida, o cambió la cama o la cuenta.")
         End Using

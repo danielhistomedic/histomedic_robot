@@ -2182,63 +2182,79 @@ valida_cantidad_2:
     End Function
 
     Shared Function Get_FechaHoraIngresoHospitalario(ByVal ClavePaciente As String, ByVal IdRecepcion As Integer) As Date
-
-        'fchhorarecepcion, fchhoraegreso
-        Dim tbegre As DataTable
-        tbegre = frmInterface.tb_Recordset_MySQL_local("Select id, fchEgresa " & _
-                                                     "from tb_notamedica_egreso where " & _
-                                                     "ccvepaciente = '" & ClavePaciente & "' and " & _
-                                                     "id_recepcion = '" & IdRecepcion & "' " & _
-                                                     "order by fchregistro desc")
-        If tbegre.Rows.Count > 0 Then
-            Try
-                Return CDate(Format(tbegre.Rows(0).Item(1), "dd/MM/yyyy HH:mm"))
-            Catch ex As Exception
-                Return Funciones.Calcula_FechaActual
-            End Try
-        End If
-
-        Dim tb_ingreso As DataTable
-        tb_ingreso = frmInterface.tb_Recordset_MySQL_local("Select tb_urg_recepcion.id, tb_urg_recepcion.fchregistro, tb_urg_recepcion.fchhorarecepcion, tb_urg_recepcion.fchregistro_Egr, tb_urg_recepcion.iHora_Egr " & _
-                                                      "from tb_urg_recepcion " & _
-                                                      "INNER JOIN cat_servicios ON (cat_servicios.cdscservicio = tb_urg_recepcion.cdscareaafectada) " & _
-                                                      "where " & _
-                                                      "(cat_servicios.cdscareaafectada = 'HOSPITALIZACION' OR cat_servicios.cdscareaafectada = 'URGENCIAS') AND " & _
-                                                      "tb_urg_recepcion.ccvepaciente = '" & ClavePaciente & "' " & _
-                                                      "order by tb_urg_recepcion.fchhorarecepcion desc")
-        If tb_ingreso.Rows.Count = 0 Then
-            Return Funciones.Calcula_FechaActual
-        End If
-
-        Dim i As Integer = 0
-
-        If tb_ingreso.Rows.Count = 1 Then
-            Return CDate(Format(tb_ingreso.Rows(0).Item(2), "dd/MM/yyyy HH:mm"))
-        End If
-
-        For i = 0 To tb_ingreso.Rows.Count - 1
-            Try
-
-                Dim fechaegr As Date
-                Dim fechaegr_str As String
-                Dim hora_str As String
-
-                fechaegr_str = Format(CDate(tb_ingreso.Rows(i + 1).Item(3)), "dd/MM/yyyy")
-                hora_str = tb_ingreso.Rows(i + 1).Item(4).ToString
-                fechaegr = CDate(fechaegr_str & " " & hora_str)
-
-                Dim horas As Integer
-                horas = DateDiff(DateInterval.Hour, fechaegr, CDate(tb_ingreso.Rows(i).Item(2)))
-                If horas >= 6 Then
-                    Return CDate(Format(tb_ingreso.Rows(i).Item(2), "dd/MM/yyyy HH:mm"))
+        ' Los egresos anteriores o una interrupción mayor de seis horas separan ingresos; urgencias no inicia el cobro.
+        ' La recepción actual es obligatoria; tener ingresos o egresos ANTERIORES no lo es.
+        Using cmd As New MySqlConnector.MySqlCommand("SELECT r.fchHoraRecepcion,r.iEgresado FROM tb_urg_recepcion r " &
+            "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente", frmInterface.cx_MySQL_local)
+            cmd.Parameters.AddWithValue("@recepcion", IdRecepcion)
+            cmd.Parameters.AddWithValue("@paciente", ClavePaciente)
+            Dim recepcionActual As DateTime
+            Using lector As MySqlConnector.MySqlDataReader = cmd.ExecuteReader()
+                If Not lector.Read() Then Throw New InvalidOperationException("No se encontró la recepción actual indicada para el paciente.")
+                If lector.IsDBNull(0) Then Throw New InvalidOperationException("La recepción actual no tiene fecha y hora de ingreso.")
+                If lector.IsDBNull(1) OrElse CInt(lector.GetValue(1)) <> 0 Then Throw New InvalidOperationException("La recepción actual está marcada como egresada o no tiene estado válido.")
+                recepcionActual = CDate(lector.GetValue(0))
+                If recepcionActual = DateTime.MinValue Then Throw New InvalidOperationException("La fecha y hora de ingreso de la recepción actual no es válida.")
+            End Using
+            ' El médico puede anticipar la nota actual. Solo iEgresado determina si esta recepción sigue vigente.
+            cmd.CommandText = "SELECT MAX(fchEgresa) FROM tb_notamedica_egreso " &
+                "WHERE ccvepaciente=@paciente AND (id_recepcion IS NULL OR id_recepcion<>@recepcion)"
+            Dim ultimoEgreso As Object = cmd.ExecuteScalar()
+            If ultimoEgreso Is Nothing Then ultimoEgreso = DBNull.Value
+            ' Sin notas anteriores, @egreso queda NULL y no restringe la búsqueda de movimientos.
+            If Not IsDBNull(ultimoEgreso) AndAlso CDate(ultimoEgreso) >= recepcionActual Then
+                Throw New InvalidOperationException("El egreso clínico es posterior a la recepción vigente.")
+            End If
+            cmd.Parameters.AddWithValue("@hasta", recepcionActual)
+            cmd.Parameters.AddWithValue("@egreso", If(ultimoEgreso Is Nothing, DBNull.Value, ultimoEgreso))
+            cmd.CommandText = "SELECT r.Id,r.fchHoraRecepcion,r.fchregistro_Egr,r.iHora_Egr," &
+                "s.cdscareaafectada AS area,s.cdscservicio AS servicio FROM tb_urg_recepcion r " &
+                "INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+                "WHERE r.ccvepaciente=@paciente AND (@egreso IS NULL OR r.fchHoraRecepcion>@egreso) " &
+                "AND (r.fchHoraRecepcion<@hasta OR (r.fchHoraRecepcion=@hasta AND r.Id<=@recepcion)) " &
+                "ORDER BY r.fchHoraRecepcion DESC,r.Id DESC"
+            Using movimientos As New DataTable(), adaptador As New MySqlConnector.MySqlDataAdapter(cmd)
+                adaptador.Fill(movimientos)
+                If movimientos.Rows.Count = 0 Then Throw New InvalidOperationException("No se pudo identificar el movimiento de servicio de la recepción actual.")
+                If CInt(movimientos.Rows(0)("Id")) <> IdRecepcion Then Throw New InvalidOperationException("No se encontró el movimiento de la recepción vigente.")
+                If movimientos.Rows.Count = 1 Then
+                    ' Una sola recepción en esta estancia: no requiere salidas ni traslados anteriores.
+                    Dim actual As DataRow = movimientos.Rows(0)
+                    Dim servicioActual As String = CStr(actual("servicio"))
+                    If CStr(actual("area")) <> "HOSPITALIZACION" OrElse servicioActual = "UTQ" OrElse servicioActual = "QUIROFANO" OrElse servicioActual = "RECUPERACION" Then
+                        Throw New InvalidOperationException("La recepción actual no pertenece a hospitalización facturable.")
+                    End If
+                    Return CDate(actual("fchHoraRecepcion"))
                 End If
-            Catch ex As Exception
-                Return CDate(Format(tb_ingreso.Rows(i).Item(2), "dd/MM/yyyy HH:mm"))
-            End Try
-        Next
-
-        Return Funciones.Calcula_FechaActual
-
+                Dim ingreso As DateTime = DateTime.MinValue
+                Dim siguiente As DateTime = recepcionActual
+                Dim primerMovimiento As Boolean = True
+                For Each movimiento As DataRow In movimientos.Rows
+                    Dim entrada As DateTime = CDate(movimiento("fchHoraRecepcion"))
+                    If primerMovimiento Then
+                        primerMovimiento = False
+                    Else
+                        If IsDBNull(movimiento("fchregistro_Egr")) OrElse IsDBNull(movimiento("iHora_Egr")) Then
+                            Throw New InvalidOperationException("Falta fecha u hora de salida para verificar la continuidad del traslado.")
+                        End If
+                        Dim hora As TimeSpan = TimeSpan.Parse(movimiento("iHora_Egr").ToString(), Globalization.CultureInfo.InvariantCulture)
+                        If hora < TimeSpan.Zero OrElse hora >= TimeSpan.FromDays(1) Then Throw New InvalidOperationException("Hora de salida del servicio inválida.")
+                        Dim salida As DateTime = CDate(movimiento("fchregistro_Egr")).Date.Add(hora)
+                        If salida < entrada Then Throw New InvalidOperationException("La salida del servicio es anterior a su ingreso.")
+                        ' Seis horas exactas siguen siendo el mismo ingreso. Comparar tiempo real, no límites de DateDiff.
+                        If siguiente - salida > TimeSpan.FromHours(6) Then Exit For
+                    End If
+                    ' Los servicios intermedios enlazan traslados, pero urgencias y áreas excluidas no inician el cobro.
+                    Dim servicio As String = CStr(movimiento("servicio"))
+                    If CStr(movimiento("area")) = "HOSPITALIZACION" AndAlso servicio <> "UTQ" AndAlso servicio <> "QUIROFANO" AndAlso servicio <> "RECUPERACION" Then
+                        ingreso = entrada
+                    End If
+                    siguiente = entrada
+                Next
+                If ingreso = DateTime.MinValue Then Throw New InvalidOperationException("No se encontró el primer ingreso a hospitalización de la estancia actual.")
+                Return ingreso
+            End Using
+        End Using
     End Function
 
 #End Region

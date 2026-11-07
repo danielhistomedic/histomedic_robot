@@ -54,6 +54,7 @@ Public Class frmInterface
     Private intentosReconexionCentral As Integer = 0
     Private proximaComprobacionCentralTicks As Long = 0
     Private WithEvents TimerReconexionCentral As New System.Timers.Timer(5000)
+    Private WithEvents TimerCamas As New System.Windows.Forms.Timer() With {.Interval = 300000}
 
 #Region "Propiedades"
 
@@ -4564,7 +4565,10 @@ intenta_otravz:
         End If
 
         load_init = False
-        If Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then TimerReconexionCentral.Start()
+        If Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
+            TimerReconexionCentral.Start()
+            TimerCamas.Start()
+        End If
 
     End Sub
 
@@ -4604,6 +4608,7 @@ intenta_otravz:
         Interlocked.Exchange(cerrandoRobot, 1)
         Interlocked.Exchange(robotActivo, 0)
         Me.TimerReconexionCentral.Stop()
+        Me.TimerCamas.Stop()
         Me.TimerEnlace.Enabled = False
         Me.DetenerProcesoSP()
         Application.ExitThread()
@@ -4621,6 +4626,7 @@ intenta_otravz:
         If Me.chkActivar.Checked Then
             Interlocked.Exchange(robotActivo, 1)
             Me.TimerEnlace.Enabled = True
+            Me.TimerCamas.Start()
             If Not load_init Then
                 Interlocked.Exchange(proximaComprobacionCentralTicks, DateTime.UtcNow.Ticks)
                 Me.ReiniciarProcesoSP()
@@ -4630,6 +4636,7 @@ intenta_otravz:
         Else
             Interlocked.Exchange(robotActivo, 0)
             Me.TimerReconexionCentral.Stop()
+            Me.TimerCamas.Stop()
             Me.TimerEnlace.Enabled = False
             Me.DetenerProcesoSP()
         End If
@@ -5109,6 +5116,184 @@ no_insertar:
 
     End Function
 
+#End Region
+
+#Region "Carga automática de camas"
+    Private Sub TimerCamas_Tick(sender As Object, e As EventArgs) Handles TimerCamas.Tick
+        If load_init OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 Then Return
+        TimerCamas.Stop()
+        Try
+            Cargar_Costo_Dias_Cama_Hosp()
+        Catch ex As Exception
+            LogEventos.Escribir("Camas: error al ejecutar la carga. " & ex.Message)
+        Finally
+            TimerCamas.Enabled = Interlocked.CompareExchange(robotActivo, 0, 0) = 1 AndAlso Interlocked.CompareExchange(cerrandoRobot, 0, 0) = 0
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' Carga los periodos de 24 horas pendientes de pacientes actualmente hospitalizados.
+    ''' TimerCamas la ejecuta cada cinco minutos; no depende del servidor central.
+    ''' Usa la cama y lista vigentes, respeta paquetes e IVA y reconoce cargos de cualquier usuario.
+    ''' </summary>
+    Private Sub Cargar_Costo_Dias_Cama_Hosp()
+        ' 1. La configuración autoriza la carga. Si está desactivada, salir sin registrar eventos.
+        If Funciones.getValorConfiguracion("ACTIVAR_REGISTRO_AUTOMATICO_CAMAS") <> "1" Then Return
+        If cx_MySQL_local.State <> ConnectionState.Open Then Throw New InvalidOperationException("La conexión local no está disponible.")
+        ' Mismo hilo y conexión del formulario; sin reintentos de INSERT ni tablas auxiliares.
+        Using cmd As New MySqlConnector.MySqlCommand("SELECT NOW()", cx_MySQL_local), pacientes As New DataTable()
+            Dim ahora As DateTime = CDate(cmd.ExecuteScalar())
+            ' 2. Solo ingresos vigentes de hospitalización, con cama/material relacionados y precio de la lista del paciente.
+            cmd.CommandText = "SELECT r.Id,r.ccvepaciente,r.icvecama,r.cdscareaafectada,m.ccvematerial,m.cDescripcion," &
+                "m.icveclave,m.ccveunidad,m.ccveanterior,m.iPrecioPublicoOficial,m.iSujetoCatalogoOficial,m.iExcentoIVA," &
+                "m.productos_paquete_id,pr.iPrecio AS precio_lista " &
+                "FROM tb_urg_recepcion r INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+                "INNER JOIN cat_camas c ON c.icvecama=r.icvecama INNER JOIN tb_materiales m ON m.ccvematerial=c.ccvematerial " &
+                "LEFT JOIN tb_paciente p ON p.ccvepaciente=r.ccvepaciente " &
+                "LEFT JOIN cat_factorsocial2 f ON f.cClasificacion=p.cClasificacion " &
+                "LEFT JOIN tb_materiales_precios pr ON pr.ccvematerial=m.ccvematerial AND pr.lista_precios_id=f.icvefactorsocial " &
+                "WHERE r.iEgresado=0 AND r.icvecama>0 AND s.cdscareaafectada='HOSPITALIZACION' " &
+                "AND s.cdscservicio NOT IN ('UTQ','QUIROFANO','RECUPERACION')"
+            Using adaptador As New MySqlConnector.MySqlDataAdapter(cmd)
+                adaptador.Fill(pacientes)
+            End Using
+            For Each fila As DataRow In pacientes.Rows
+                Dim cuenta As String = ""
+                Dim recalcular As Boolean = False
+                Try
+                    Dim paciente As String = CStr(fila("ccvepaciente"))
+                    If pacientes.Rows.Cast(Of DataRow)().Count(Function(r) CStr(r("ccvepaciente")) = paciente) <> 1 Then
+                        Throw New InvalidOperationException("Recepción, cama o precio duplicado para el paciente.")
+                    End If
+                    cuenta = NumCuentaPaciente(paciente, CInt(fila("icvecama")))
+                    If String.IsNullOrWhiteSpace(cuenta) Then Throw New InvalidOperationException("El paciente no tiene una cuenta hospitalaria abierta.")
+                    ' 3. Primer ingreso a hospitalización del bloque continuo: traslados de hasta seis horas no lo reinician.
+                    '    Urgencias previas no cuentan; los servicios intermedios no detienen el reloj ya iniciado.
+                    '    Si es el primer ingreso y no hay antecedentes, se usa la fecha de la recepción actual.
+                    '    Una nota de egreso anticipada no detiene el cálculo ni la carga si iEgresado sigue en cero.
+                    Dim ingreso As DateTime = Funciones.Get_FechaHoraIngresoHospitalario(paciente, CInt(fila("Id")))
+                    If ingreso > ahora Then Throw New InvalidOperationException("La fecha de ingreso es futura.")
+                    cmd.Parameters.Clear()
+                    cmd.Parameters.AddWithValue("@cuenta", cuenta)
+                    cmd.Parameters.AddWithValue("@paciente", paciente)
+                    cmd.CommandText = "SELECT CASE WHEN COUNT(*)=1 THEN MAX(icveticketec) ELSE NULL END FROM tb_ticketsec " &
+                        "WHERE cNumTicketec=@cuenta AND ccvepaciente=@paciente AND cEstatus='ABIERTO'"
+                    Dim idCuenta As Object = cmd.ExecuteScalar()
+                    If idCuenta Is Nothing OrElse IsDBNull(idCuenta) Then Throw New InvalidOperationException("La cuenta no está abierta o no es inequívoca.")
+                    cmd.Parameters.AddWithValue("@idCuenta", CInt(idCuenta))
+                    cmd.Parameters.AddWithValue("@recepcion", CInt(fila("Id")))
+                    cmd.Parameters.AddWithValue("@cama", CInt(fila("icvecama")))
+                    cmd.Parameters.AddWithValue("@material", CStr(fila("ccvematerial")))
+                    cmd.Parameters.AddWithValue("@grupo", If(IsDBNull(fila("productos_paquete_id")), 0, CInt(fila("productos_paquete_id"))))
+                    cmd.Parameters.AddWithValue("@inicio", ingreso)
+                    cmd.Parameters.AddWithValue("@fin", ingreso.AddDays(1))
+                    cmd.Parameters.AddWithValue("@paquete", 0)
+                    cmd.Parameters.AddWithValue("@fuera", 0D)
+                    cmd.Parameters.AddWithValue("@cubierta", 0D)
+                    cmd.Parameters.AddWithValue("@precioFuera", 0D)
+                    cmd.Parameters.AddWithValue("@precioCubierto", 0D)
+                    cmd.Parameters.AddWithValue("@clues", Me.CLUES)
+                    cmd.Parameters.AddWithValue("@descripcion", CStr(fila("cDescripcion")))
+                    cmd.Parameters.AddWithValue("@clave", CInt(fila("icveclave")))
+                    cmd.Parameters.AddWithValue("@unidad", CStr(fila("ccveunidad")))
+                    cmd.Parameters.AddWithValue("@anterior", If(IsDBNull(fila("ccveanterior")), "", CStr(fila("ccveanterior"))))
+                    cmd.Parameters.AddWithValue("@publico", CDec(fila("iPrecioPublicoOficial")))
+                    cmd.Parameters.AddWithValue("@oficial", CInt(fila("iSujetoCatalogoOficial")))
+                    cmd.Parameters.AddWithValue("@iva", CStr(fila("iExcentoIVA")))
+                    cmd.Parameters.AddWithValue("@servicio", CStr(fila("cdscareaafectada")))
+                    cmd.Parameters.AddWithValue("@dx", Get_DxNumTicketEstadoCuenta(cuenta))
+                    ' 4. El primer periodo (índice cero) se cobra al ingreso. Cada ventana incluye su inicio y excluye el siguiente.
+                    '    Recorrer desde el primero recupera los faltantes; cualquier cargo previo de cama evita repetir el periodo.
+                    Dim periodos As Integer = CInt((ahora.Ticks - ingreso.Ticks) \ TimeSpan.TicksPerDay)
+                    For periodo As Integer = 0 To periodos
+                        cmd.Parameters("@inicio").Value = ingreso.AddDays(periodo)
+                        cmd.Parameters("@fin").Value = ingreso.AddDays(periodo + 1)
+                        ' Cualquier cama y cualquier usuario cubren el periodo, incluso cargos fraccionados de paquete.
+                        ' Si ya hay un registro, las diferencias las corrige el usuario; no completar cargos automáticamente.
+                        cmd.CommandText = "SELECT COUNT(*) FROM tb_ticketsec_detalle d LEFT JOIN cat_camas c ON c.ccvematerial=d.ccvematerial " &
+                            "WHERE (d.icveticketec=@idCuenta OR d.cNumTicketEC=@cuenta) AND d.fchregistro>=@inicio AND d.fchregistro<@fin " &
+                            "AND (d.icvecama>0 OR c.icvecama IS NOT NULL)"
+                        If CInt(cmd.ExecuteScalar()) > 0 Then Continue For
+                        If IsDBNull(fila("precio_lista")) Then Throw New InvalidOperationException("No existe precio para la lista del paciente.")
+                        Dim precio As Decimal = CDec(fila("precio_lista"))
+                        If precio < 0 Then Throw New InvalidOperationException("El precio de la cama es negativo.")
+                        ' 5. El importe de lista se convierte a base sin IVA únicamente cuando el material está gravado.
+                        Dim factor As Decimal = 1D
+                        If CStr(fila("iExcentoIVA")) = "I" Then
+                            cmd.CommandText = "SELECT CASE WHEN COUNT(*)=1 THEN MAX(iFactor) ELSE NULL END FROM cat_impuestos WHERE iVigente=1"
+                            Dim impuesto As Object = cmd.ExecuteScalar()
+                            If impuesto Is Nothing OrElse IsDBNull(impuesto) OrElse CDec(impuesto) <= 0 Then Throw New InvalidOperationException("No existe un factor de IVA vigente inequívoco.")
+                            factor = CDec(impuesto)
+                        End If
+                        cmd.CommandText = "SELECT CASE WHEN COUNT(*)>1 THEN -1 ELSE COALESCE(MAX(paquete_id),0) END FROM tb_paciente_paquete WHERE ccvepaciente=@paciente AND estatus=0"
+                        Dim paquete As Integer = CInt(cmd.ExecuteScalar())
+                        If paquete < 0 Then Throw New InvalidOperationException("El paciente tiene más de un paquete activo.")
+                        cmd.Parameters("@paquete").Value = paquete
+                        ' 6. La cobertura disponible del paquete depende del consumo acumulado por material o grupo.
+                        '    Un día puede dividirse en una parte cubierta y otra con cargo fuera del paquete.
+                        Dim cubierta As Decimal = 0D
+                        If paquete > 0 Then
+                            Dim autorizada As Decimal = 0D
+                            cmd.CommandText = "SELECT MIN(iCantidad),MAX(iCantidad) FROM tb_paquete_detalle WHERE paquete_id=@paquete " &
+                                "AND ((@grupo=0 AND ccvematerial=@material) OR (@grupo>0 AND productos_paquete_id=@grupo))"
+                            Using lector As MySqlConnector.MySqlDataReader = cmd.ExecuteReader()
+                                If lector.Read() AndAlso Not lector.IsDBNull(0) Then
+                                    autorizada = CDec(lector.GetValue(0))
+                                    If autorizada < 0 OrElse autorizada <> CDec(lector.GetValue(1)) Then Throw New InvalidOperationException("Cantidad de cama ambigua en el paquete.")
+                                End If
+                            End Using
+                            cmd.CommandText = "SELECT COALESCE(SUM(d.iCantidad),0) FROM tb_ticketsec_detalle d INNER JOIN tb_materiales m ON m.ccvematerial=d.ccvematerial " &
+                                "WHERE d.cNumTicketEC=@cuenta AND ((@grupo=0 AND d.ccvematerial=@material) OR (@grupo>0 AND m.productos_paquete_id=@grupo))"
+                            cubierta = Math.Max(0D, Math.Min(1D, autorizada - CDec(cmd.ExecuteScalar())))
+                        End If
+                        Dim fuera As Decimal = 1D - cubierta
+                        Dim precioFuera As Decimal = Math.Round(Math.Round(precio * fuera, 2) / factor, 2)
+                        cmd.Parameters("@cubierta").Value = cubierta
+                        cmd.Parameters("@fuera").Value = fuera
+                        cmd.Parameters("@precioFuera").Value = precioFuera
+                        cmd.Parameters("@precioCubierto").Value = Math.Round(Math.Round(precio * cubierta, 2) / factor, 2)
+                        ' 7. Una sola sentencia inserta el día y sus posibles dos partes; revalida ingreso, cuenta y cargos previos.
+                        '    fchregistro=@inicio identifica el periodo recuperado. No reintentar INSERT ante errores de comunicación.
+                        cmd.CommandText = "INSERT INTO tb_ticketsec_detalle (clues,icveticketec,cNumTicketEC,iCantidad,cDescripcion,ccvematerial,icveclave,icvecama," &
+                            "cCodigoBarras,ccveanterior,ccveunidad,iPrecioVenta,iPrecioPublico,iPrecioSujetoCatOficial,cExentoIVA,cNumLote,iDescuento," &
+                            "cDoctoAbono,cdscareaafectada,icvdiagnostico,iCubreSP,ccvematerial_cubresp,fchregistro,motivo_registro_manual,ccveusuario) " &
+                            "SELECT @clues,@idCuenta,@cuenta,parte.cantidad,@descripcion,@material,@clave,@cama,@material,@anterior,@unidad,parte.precio," &
+                            "@publico,@oficial,@iva,'',0,'',@servicio,@dx,parte.paquete,'',@inicio,'','servidor' " &
+                            "FROM tb_urg_recepcion r INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
+                            "INNER JOIN cat_camas c ON c.icvecama=r.icvecama INNER JOIN tb_materiales m ON m.ccvematerial=c.ccvematerial " &
+                            "INNER JOIN tb_ticketsec e ON e.icveticketec=@idCuenta AND e.cNumTicketec=@cuenta AND e.ccvepaciente=r.ccvepaciente " &
+                            "INNER JOIN (SELECT @fuera cantidad,@precioFuera precio,0 paquete UNION ALL SELECT @cubierta,@precioCubierto,@paquete) parte ON parte.cantidad>0 " &
+                            "LEFT JOIN tb_ticketsec_detalle previo ON (previo.icveticketec=@idCuenta OR previo.cNumTicketEC=@cuenta) AND previo.fchregistro>=@inicio AND previo.fchregistro<@fin " &
+                            "LEFT JOIN cat_camas cama_previa ON cama_previa.ccvematerial=previo.ccvematerial " &
+                            "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente AND r.iEgresado=0 AND r.icvecama=@cama AND m.ccvematerial=@material " &
+                            "AND s.cdscareaafectada='HOSPITALIZACION' AND s.cdscservicio NOT IN ('UTQ','QUIROFANO','RECUPERACION') AND e.cEstatus='ABIERTO' " &
+                            "GROUP BY r.Id,parte.cantidad,parte.precio,parte.paquete " &
+                            "HAVING SUM(CASE WHEN previo.icveticketecdetalle IS NOT NULL AND (previo.icvecama>0 OR cama_previa.icvecama IS NOT NULL) THEN 1 ELSE 0 END)=0"
+                        recalcular = True ' También recalcular si se pierde la respuesta después de persistir el cargo.
+                        Dim insertados As Integer = cmd.ExecuteNonQuery()
+                        If insertados = 0 Then Exit For
+                        LogEventos.Escribir("Camas: cargo insertado en cuenta " & cuenta & ", periodo " & ingreso.AddDays(periodo).ToString("yyyy-MM-dd HH:mm:ss") & ".")
+                        If paquete > 0 AndAlso fuera > 0 AndAlso precioFuera > 0 Then
+                            cmd.CommandText = "INSERT INTO tb_paquetes_notificaciones (clues,paquete_id,ccvepaciente,ccvematerial,descripcion,cantidad_unitario,ccveunidad_unitario,enviado) " &
+                                "VALUES (@clues,@paquete,@paciente,@material,@descripcion,@fuera,@unidad,0)"
+                            cmd.ExecuteNonQuery()
+                        End If
+                    Next
+                Catch ex As Exception
+                    LogEventos.Escribir("Camas: error en cuenta " & cuenta & ". " & ex.Message)
+                Finally
+                    ' 8. Recalcular una vez por cuenta al finalizar, incluso si la respuesta de una inserción fue incierta.
+                    If recalcular Then
+                        Try
+                            Funciones.RecalcularTotales(cuenta)
+                        Catch ex As Exception
+                            LogEventos.Escribir("Camas: error al recalcular cuenta " & cuenta & ". " & ex.Message)
+                        End Try
+                    End If
+                End Try
+            Next
+        End Using
+    End Sub
 #End Region
 
 #Region "Procesos Estados de Cuenta"

@@ -5143,12 +5143,12 @@ no_insertar:
         ' Mismo hilo y conexión del formulario; sin reintentos de INSERT ni tablas auxiliares.
         Using cmd As New MySqlConnector.MySqlCommand("SELECT NOW()", cx_MySQL_local), pacientes As New DataTable()
             Dim ahora As DateTime = CDate(cmd.ExecuteScalar())
-            ' 2. Solo ingresos vigentes de hospitalización, con cama/material relacionados y precio de la lista del paciente.
+            ' 2. Solo hospitalizados vigentes. LEFT JOIN permite informar camas sin material, en vez de omitirlas silenciosamente.
             cmd.CommandText = "SELECT r.Id,r.ccvepaciente,r.icvecama,r.cdscareaafectada,m.ccvematerial,m.cDescripcion," &
                 "m.icveclave,m.ccveunidad,m.ccveanterior,m.iPrecioPublicoOficial,m.iSujetoCatalogoOficial,m.iExcentoIVA," &
                 "m.productos_paquete_id,pr.iPrecio AS precio_lista " &
                 "FROM tb_urg_recepcion r INNER JOIN cat_servicios s ON s.cdscservicio=r.cdscareaafectada " &
-                "INNER JOIN cat_camas c ON c.icvecama=r.icvecama INNER JOIN tb_materiales m ON m.ccvematerial=c.ccvematerial " &
+                "LEFT JOIN cat_camas c ON c.icvecama=r.icvecama LEFT JOIN tb_materiales m ON m.ccvematerial=c.ccvematerial " &
                 "LEFT JOIN tb_paciente p ON p.ccvepaciente=r.ccvepaciente " &
                 "LEFT JOIN cat_factorsocial2 f ON f.cClasificacion=p.cClasificacion " &
                 "LEFT JOIN tb_materiales_precios pr ON pr.ccvematerial=m.ccvematerial AND pr.lista_precios_id=f.icvefactorsocial " &
@@ -5167,6 +5167,9 @@ no_insertar:
                     End If
                     cuenta = NumCuentaPaciente(paciente, CInt(fila("icvecama")))
                     If String.IsNullOrWhiteSpace(cuenta) Then Throw New InvalidOperationException("El paciente no tiene una cuenta hospitalaria abierta.")
+                    If IsDBNull(fila("ccvematerial")) OrElse String.IsNullOrWhiteSpace(CStr(fila("ccvematerial"))) Then
+                        Throw New InvalidOperationException("La cama " & CInt(fila("icvecama")).ToString() & " no tiene un producto/servicio válido relacionado en cat_camas y tb_materiales.")
+                    End If
                     ' 3. Primer ingreso a hospitalización del bloque continuo: traslados de hasta seis horas no lo reinician.
                     '    Urgencias previas no cuentan; los servicios intermedios no detienen el reloj ya iniciado.
                     '    Si es el primer ingreso y no hay antecedentes, se usa la fecha de la recepción actual.
@@ -5205,15 +5208,24 @@ no_insertar:
                     ' 4. El primer periodo (índice cero) se cobra al ingreso. Cada ventana incluye su inicio y excluye el siguiente.
                     '    Recorrer desde el primero recupera los faltantes; cualquier cargo previo de cama evita repetir el periodo.
                     Dim periodos As Integer = CInt((ahora.Ticks - ingreso.Ticks) \ TimeSpan.TicksPerDay)
+                    cmd.Parameters.AddWithValue("@ingreso", ingreso)
+                    cmd.Parameters.AddWithValue("@diasFacturables", periodos + 1)
                     For periodo As Integer = 0 To periodos
                         cmd.Parameters("@inicio").Value = ingreso.AddDays(periodo)
                         cmd.Parameters("@fin").Value = ingreso.AddDays(periodo + 1)
-                        ' Cualquier cama y cualquier usuario cubren el periodo, incluso cargos fraccionados de paquete.
+                        ' Solo productos relacionados a cat_camas son cargos de cama; otros productos también pueden tener icvecama asignado.
+                        ' Cualquier cama y usuario cubren el periodo, incluso cargos fraccionados de paquete.
                         ' Si ya hay un registro, las diferencias las corrige el usuario; no completar cargos automáticamente.
-                        cmd.CommandText = "SELECT COUNT(*) FROM tb_ticketsec_detalle d LEFT JOIN cat_camas c ON c.ccvematerial=d.ccvematerial " &
+                        cmd.CommandText = "SELECT COUNT(*) FROM tb_ticketsec_detalle d " &
                             "WHERE (d.icveticketec=@idCuenta OR d.cNumTicketEC=@cuenta) AND d.fchregistro>=@inicio AND d.fchregistro<@fin " &
-                            "AND (d.icvecama>0 OR c.icvecama IS NOT NULL)"
+                            "AND EXISTS(SELECT 1 FROM cat_camas c WHERE c.ccvematerial=d.ccvematerial)"
                         If CInt(cmd.ExecuteScalar()) > 0 Then Continue For
+                        ' Los días cobrados por adelantado también cubren la estancia, aunque compartan ventana de captura.
+                        ' Sumar cantidades evita contar dos veces un día dividido entre paquete y cargo particular.
+                        cmd.CommandText = "SELECT COALESCE(SUM(d.iCantidad),0) FROM tb_ticketsec_detalle d " &
+                            "WHERE (d.icveticketec=@idCuenta OR d.cNumTicketEC=@cuenta) AND d.fchregistro>=@ingreso " &
+                            "AND EXISTS(SELECT 1 FROM cat_camas c WHERE c.ccvematerial=d.ccvematerial)"
+                        If CDec(cmd.ExecuteScalar()) + 1D > periodos + 1 Then Exit For
                         If IsDBNull(fila("precio_lista")) Then Throw New InvalidOperationException("No existe precio para la lista del paciente.")
                         Dim precio As Decimal = CDec(fila("precio_lista"))
                         If precio < 0 Then Throw New InvalidOperationException("El precio de la cama es negativo.")
@@ -5263,12 +5275,13 @@ no_insertar:
                             "INNER JOIN cat_camas c ON c.icvecama=r.icvecama INNER JOIN tb_materiales m ON m.ccvematerial=c.ccvematerial " &
                             "INNER JOIN tb_ticketsec e ON e.icveticketec=@idCuenta AND e.cNumTicketec=@cuenta AND e.ccvepaciente=r.ccvepaciente " &
                             "INNER JOIN (SELECT @fuera cantidad,@precioFuera precio,0 paquete UNION ALL SELECT @cubierta,@precioCubierto,@paquete) parte ON parte.cantidad>0 " &
-                            "LEFT JOIN tb_ticketsec_detalle previo ON (previo.icveticketec=@idCuenta OR previo.cNumTicketEC=@cuenta) AND previo.fchregistro>=@inicio AND previo.fchregistro<@fin " &
-                            "LEFT JOIN cat_camas cama_previa ON cama_previa.ccvematerial=previo.ccvematerial " &
+                            "LEFT JOIN tb_ticketsec_detalle previo ON (previo.icveticketec=@idCuenta OR previo.cNumTicketEC=@cuenta) AND previo.fchregistro>=@ingreso " &
+                            "LEFT JOIN (SELECT DISTINCT ccvematerial FROM cat_camas) cama_previa ON cama_previa.ccvematerial=previo.ccvematerial " &
                             "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente AND r.iEgresado=0 AND r.icvecama=@cama AND m.ccvematerial=@material " &
                             "AND s.cdscareaafectada='HOSPITALIZACION' AND s.cdscservicio NOT IN ('UTQ','QUIROFANO','RECUPERACION') AND e.cEstatus='ABIERTO' " &
                             "GROUP BY r.Id,parte.cantidad,parte.precio,parte.paquete " &
-                            "HAVING SUM(CASE WHEN previo.icveticketecdetalle IS NOT NULL AND (previo.icvecama>0 OR cama_previa.icvecama IS NOT NULL) THEN 1 ELSE 0 END)=0"
+                            "HAVING SUM(CASE WHEN cama_previa.ccvematerial IS NOT NULL AND previo.fchregistro>=@inicio AND previo.fchregistro<@fin THEN 1 ELSE 0 END)=0 " &
+                            "AND SUM(CASE WHEN cama_previa.ccvematerial IS NOT NULL THEN COALESCE(previo.iCantidad,0) ELSE 0 END)+1<=@diasFacturables"
                         recalcular = True ' También recalcular si se pierde la respuesta después de persistir el cargo.
                         Dim insertados As Integer = cmd.ExecuteNonQuery()
                         If insertados = 0 Then Exit For

@@ -5179,10 +5179,11 @@ no_insertar:
                     cmd.Parameters.Clear()
                     cmd.Parameters.AddWithValue("@cuenta", cuenta)
                     cmd.Parameters.AddWithValue("@paciente", paciente)
+                    ' La cuenta debe estar abierta y permitir cargos automáticos; NULL tampoco autoriza la carga.
                     cmd.CommandText = "SELECT CASE WHEN COUNT(*)=1 THEN MAX(icveticketec) ELSE NULL END FROM tb_ticketsec " &
-                        "WHERE cNumTicketec=@cuenta AND ccvepaciente=@paciente AND cEstatus='ABIERTO'"
+                        "WHERE cNumTicketec=@cuenta AND ccvepaciente=@paciente AND cEstatus='ABIERTO' AND desactivar_cargos_automaticos=0"
                     Dim idCuenta As Object = cmd.ExecuteScalar()
-                    If idCuenta Is Nothing OrElse IsDBNull(idCuenta) Then Throw New InvalidOperationException("La cuenta no está abierta o no es inequívoca.")
+                    If idCuenta Is Nothing OrElse IsDBNull(idCuenta) Then Throw New InvalidOperationException("La cuenta no está abierta, no permite cargos automáticos o no es inequívoca.")
                     cmd.Parameters.AddWithValue("@idCuenta", CInt(idCuenta))
                     cmd.Parameters.AddWithValue("@recepcion", CInt(fila("Id")))
                     cmd.Parameters.AddWithValue("@cama", CInt(fila("icvecama")))
@@ -5278,7 +5279,7 @@ no_insertar:
                             "LEFT JOIN tb_ticketsec_detalle previo ON (previo.icveticketec=@idCuenta OR previo.cNumTicketEC=@cuenta) AND previo.fchregistro>=@ingreso " &
                             "LEFT JOIN (SELECT DISTINCT ccvematerial FROM cat_camas) cama_previa ON cama_previa.ccvematerial=previo.ccvematerial " &
                             "WHERE r.Id=@recepcion AND r.ccvepaciente=@paciente AND r.iEgresado=0 AND r.icvecama=@cama AND m.ccvematerial=@material " &
-                            "AND s.cdscareaafectada='HOSPITALIZACION' AND s.cdscservicio NOT IN ('UTQ','QUIROFANO','RECUPERACION') AND e.cEstatus='ABIERTO' " &
+                            "AND s.cdscareaafectada='HOSPITALIZACION' AND s.cdscservicio NOT IN ('UTQ','QUIROFANO','RECUPERACION') AND e.cEstatus='ABIERTO' AND e.desactivar_cargos_automaticos=0 " &
                             "GROUP BY r.Id,parte.cantidad,parte.precio,parte.paquete " &
                             "HAVING SUM(CASE WHEN cama_previa.ccvematerial IS NOT NULL AND previo.fchregistro>=@inicio AND previo.fchregistro<@fin THEN 1 ELSE 0 END)=0 " &
                             "AND SUM(CASE WHEN cama_previa.ccvematerial IS NOT NULL THEN COALESCE(previo.iCantidad,0) ELSE 0 END)+1<=@diasFacturables"

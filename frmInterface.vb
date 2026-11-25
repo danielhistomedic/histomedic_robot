@@ -533,6 +533,9 @@ Public Class frmInterface
                 longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
+                Dim esTablaServicio As Boolean =
+                    String.Equals(table_name, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase) OrElse
+                    String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase)
 
                 Dim set_value As String = ""
 
@@ -654,10 +657,29 @@ Public Class frmInterface
 
                         Else
 
-                            Dim tb_valida_ins As DataTable
-                            tb_valida_ins = tb_Recordset_MySQL_CentralAsync("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
+                            Dim existeEnPortal As Boolean = False
+                            If esTablaServicio Then
+                                ' Un ID repetido puede pertenecer a otro servicio del portal.
+                                If tb_temp_insert.Columns.Contains("guid_system") Then
+                                    Dim guidSistema As Object = tb_temp_insert.Rows(0)("guid_system")
+                                    If Not IsDBNull(guidSistema) AndAlso Not String.IsNullOrWhiteSpace(guidSistema.ToString()) Then
+                                        Using coincidencia As DataTable = tb_Recordset_MySQL_CentralAsync(
+                                            "SELECT 1 FROM " & table_name & " WHERE guid_system = @guid", guidSistema)
+                                            existeEnPortal = coincidencia.Rows.Count = 1
+                                        End Using
+                                    End If
+                                End If
+                                If Not existeEnPortal Then
+                                    AgregarLog(100, "Réplica: no se confirmó el alta por guid_system en " & table_name &
+                                                        ", ID local " & campo_llave_value_id & ". El movimiento sigue pendiente.")
+                                End If
+                            Else
+                                Using coincidencia As DataTable = tb_Recordset_MySQL_CentralAsync("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
+                                    existeEnPortal = coincidencia.Rows.Count > 0
+                                End Using
+                            End If
 
-                            If tb_valida_ins.Rows.Count > 0 Then
+                            If existeEnPortal Then
                                 Update_localAsync("his_replica", _
                                              "sinc = 0", _
                                              "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -670,8 +692,27 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
+                    Dim actualizarPorGuid As Boolean = esTablaServicio
+                    Dim parametrosUpdate As New Dictionary(Of String, Object)()
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+
+                    If actualizarPorGuid Then
+                        If tb_temp_insert.Rows.Count <> 1 OrElse Not tb_temp_insert.Columns.Contains("guid_system") Then
+                            LogEventos.Escribir("Réplica: no se pudo obtener guid_system local de " & table_name & ", ID " & campo_llave_value_id & ".")
+                            Continue For
+                        End If
+
+                        Dim guidSistema As Object = tb_temp_insert.Rows(0)("guid_system")
+                        Dim guidBinario As Byte() = TryCast(guidSistema, Byte())
+                        If IsDBNull(guidSistema) OrElse
+                            (guidBinario Is Nothing AndAlso String.IsNullOrWhiteSpace(guidSistema.ToString())) OrElse
+                            (guidBinario IsNot Nothing AndAlso guidBinario.Length = 0) Then
+                            LogEventos.Escribir("Réplica: guid_system vacío en " & table_name & ", ID " & campo_llave_value_id & ".")
+                            Continue For
+                        End If
+                        parametrosUpdate.Add("@guid", guidSistema)
+                    End If
 
                     If tb_temp_insert.Rows.Count > 0 Then
 
@@ -728,6 +769,10 @@ Public Class frmInterface
                             columnasExcluir = New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
                         End If
 
+                        If actualizarPorGuid Then
+                            columnasExcluir.Add("guid_system")
+                            columnasExcluir.Add(campo_llave)
+                        End If
 
                         For col As Integer = 0 To tb_campos.Rows.Count - 1
 
@@ -764,11 +809,17 @@ Public Class frmInterface
                             ElseIf tipo = "longblob" Then
 
                                 If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    Try
-                                        Update_FotoSistema_CentralAsync(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                    Catch ex As Exception
-                                        AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                    End Try
+                                    If actualizarPorGuid Then
+                                        Dim parametroBlob As String = "@blob" & col.ToString()
+                                        parametrosUpdate.Add(parametroBlob, tb_temp_insert.Rows(0).Item(col))
+                                        set_value = set_value & " " & campo_nombre & " = " & parametroBlob & ", "
+                                    Else
+                                        Try
+                                            Update_FotoSistema_CentralAsync(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
+                                        Catch ex As Exception
+                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
+                                        End Try
+                                    End If
                                 End If
 
                             ElseIf tipo = "int" Then
@@ -810,9 +861,16 @@ Public Class frmInterface
                                      "id", tb_his_replica_local.Rows(i).Item("id").ToString)
 
                     Else
-                        If Update_CentralAsync(table_name, _
-                                       set_value, _
-                                       campo_llave, campo_llave_value_id) Then
+                        Dim actualizado As Boolean
+                        If actualizarPorGuid Then
+                            Dim sqlUpdate As String = "UPDATE " & table_name & " SET " & set_value &
+                                " WHERE guid_system = @guid"
+                            actualizado = Update_CentralAsync(sqlUpdate, parametrosUpdate)
+                        Else
+                            actualizado = Update_CentralAsync(table_name, set_value, campo_llave, campo_llave_value_id)
+                        End If
+
+                        If actualizado Then
 
                             Update_CentralAsync("fchactual", _
                                            "fchActual = current_timestamp", _
@@ -3530,7 +3588,7 @@ no_insertar_cx:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_CentralAsync(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_CentralAsync(ByVal Comando As String, Optional ByVal guidSistema As Object = Nothing) As Data.DataTable
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
@@ -3541,6 +3599,7 @@ no_insertar_cx:
             Dim tabla As New DataTable()
             Try
                 Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsync)
+                    If guidSistema IsNot Nothing Then comandoCentral.Parameters.AddWithValue("@guid", guidSistema)
                     Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
                         adaptador.Fill(tabla)
                     End Using
@@ -3554,7 +3613,7 @@ no_insertar_cx:
         End SyncLock
     End Function
 
-    Public Function Update_CentralAsync(ByVal Cadena As String) As Boolean
+    Public Function Update_CentralAsync(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
 
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
@@ -3565,7 +3624,16 @@ no_insertar_cx:
             End If
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
-                    cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing Then
+                        For Each parametro As KeyValuePair(Of String, Object) In parametros
+                            cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+                        Next
+                    End If
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing AndAlso filas = 0 Then
+                        LogEventos.Escribir("Réplica: el guid_system no encontró una fila en el portal. El movimiento sigue pendiente.")
+                        Return False
+                    End If
                 End Using
                 Return True
             Catch ex As Exception

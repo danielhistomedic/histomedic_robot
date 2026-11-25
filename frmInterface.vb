@@ -524,13 +524,10 @@ Public Class frmInterface
             End Try
 
             Dim set_value_row As String = ""
-            Dim longblob_filed_contain As Boolean = False
-            Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
 
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
-                longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
                 Dim esTablaServicio As Boolean =
@@ -555,7 +552,8 @@ Public Class frmInterface
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
 
-                    If tb_temp_insert.Rows.Count > 0 Then
+                    Dim archivos As New Dictionary(Of String, Byte())()
+                    If tb_temp_insert.Rows.Count = 1 Then
 
                         Dim tb_campos As DataTable = Nothing
                         If Not columnCache.TryGetValue(table_name, tb_campos) Then
@@ -591,7 +589,9 @@ Public Class frmInterface
                                 set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
 
                             ElseIf tipo = "longblob" Then
-                                longblob_filed_contain = True
+                                If Not tb_temp_insert.Rows(0).IsNull(col) Then
+                                    archivos.Add(campo_nombre, DirectCast(tb_temp_insert.Rows(0).Item(col), Byte()))
+                                End If
 
                             ElseIf tipo = "int" Then
                                 Dim campo_int As String = ""
@@ -624,69 +624,10 @@ Public Class frmInterface
 
                     End If
 
-                    If set_value = "" Then
-                        Update_localAsync("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                    Else
-                        If Insert_CentralAsync(table_name, _
-                                          set_value) Then
-
-                            If longblob_filed_contain = True Then
-                                Dim tb_longblob As DataTable = tb_Recordset_MySQL_localAsync("SHOW COLUMNS FROM " & table_name & " WHERE Type = 'longblob';")
-                                For col_lb As Integer = 0 To tb_longblob.Rows.Count - 1
-                                    name_file_blob = tb_longblob.Rows(col_lb).Item("Field").ToString
-                                    If Not IsDBNull(tb_temp_insert.Rows(0).Item(name_file_blob)) Then
-                                        Try
-                                            Update_FotoSistema_CentralAsync(name_file_blob, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(name_file_blob))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                Next
-
-                            End If
-
-                            Update_CentralAsync("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_localAsync("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                        Else
-
-                            Dim existeEnPortal As Boolean = False
-                            If esTablaServicio Then
-                                ' Un ID repetido puede pertenecer a otro servicio del portal.
-                                If tb_temp_insert.Columns.Contains("guid_system") Then
-                                    Dim guidSistema As Object = tb_temp_insert.Rows(0)("guid_system")
-                                    If Not IsDBNull(guidSistema) AndAlso Not String.IsNullOrWhiteSpace(guidSistema.ToString()) Then
-                                        Using coincidencia As DataTable = tb_Recordset_MySQL_CentralAsync(
-                                            "SELECT 1 FROM " & table_name & " WHERE guid_system = @guid", guidSistema)
-                                            existeEnPortal = coincidencia.Rows.Count = 1
-                                        End Using
-                                    End If
-                                End If
-                                If Not existeEnPortal Then
-                                    AgregarLog(100, "Réplica: no se confirmó el alta por guid_system en " & table_name &
-                                                        ", ID local " & campo_llave_value_id & ". El movimiento sigue pendiente.")
-                                End If
-                            Else
-                                Using coincidencia As DataTable = tb_Recordset_MySQL_CentralAsync("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
-                                    existeEnPortal = coincidencia.Rows.Count > 0
-                                End Using
-                            End If
-
-                            If existeEnPortal Then
-                                Update_localAsync("his_replica", _
-                                             "sinc = 0", _
-                                             "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                            End If
-
-                        End If
-
+                    If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           AddressOf Insert_CentralAsync, AddressOf tb_Recordset_MySQL_CentralAsync, AddressOf Update_FotoSistema_CentralAsync) Then
+                        Update_CentralAsync("fchactual", "fchActual = current_timestamp", "Id", 1)
+                        Update_localAsync("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                     End If
 
 
@@ -998,13 +939,10 @@ Public Class frmInterface
             End Try
 
             Dim set_value_row As String = ""
-            Dim longblob_filed_contain As Boolean = False
-            Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
 
-                longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
 
@@ -1026,7 +964,8 @@ Public Class frmInterface
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_localAsyncALM("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
 
-                    If tb_temp_insert.Rows.Count > 0 Then
+                    Dim archivos As New Dictionary(Of String, Byte())()
+                    If tb_temp_insert.Rows.Count = 1 Then
 
                         Dim tb_campos As DataTable = Nothing
                         If Not columnCache.TryGetValue(table_name, tb_campos) Then
@@ -1062,7 +1001,9 @@ Public Class frmInterface
                                 set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
 
                             ElseIf tipo = "longblob" Then
-                                longblob_filed_contain = True
+                                If Not tb_temp_insert.Rows(0).IsNull(col) Then
+                                    archivos.Add(campo_nombre, DirectCast(tb_temp_insert.Rows(0).Item(col), Byte()))
+                                End If
 
                             ElseIf tipo = "int" Then
                                 Dim campo_int As String = ""
@@ -1095,50 +1036,10 @@ Public Class frmInterface
 
                     End If
 
-                    If set_value = "" Then
-                        Update_localAsyncALM("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                    Else
-                        If Insert_CentralAsyncALM(table_name, _
-                                          set_value) Then
-
-                            If longblob_filed_contain = True Then
-                                Dim tb_longblob As DataTable = tb_Recordset_MySQL_localAsyncALM("SHOW COLUMNS FROM " & table_name & " WHERE Type = 'longblob';")
-                                For col_lb As Integer = 0 To tb_longblob.Rows.Count - 1
-                                    name_file_blob = tb_longblob.Rows(col_lb).Item("Field").ToString
-                                    If Not IsDBNull(tb_temp_insert.Rows(0).Item(name_file_blob)) Then
-                                        Try
-                                            Update_FotoSistema_CentralAsyncALM(name_file_blob, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(name_file_blob))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                Next
-
-                            End If
-
-                            Update_CentralAsyncALM("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_localAsyncALM("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                        Else
-
-                            Dim tb_valida_ins As DataTable
-                            tb_valida_ins = tb_Recordset_MySQL_CentralAsyncALM("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
-
-                            If tb_valida_ins.Rows.Count > 0 Then
-                                Update_localAsyncALM("his_replica", _
-                                             "sinc = 0", _
-                                             "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                            End If
-
-                        End If
-
+                    If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           AddressOf Insert_CentralAsyncALM, AddressOf tb_Recordset_MySQL_CentralAsyncALM, AddressOf Update_FotoSistema_CentralAsyncALM) Then
+                        Update_CentralAsyncALM("fchactual", "fchActual = current_timestamp", "Id", 1)
+                        Update_localAsyncALM("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                     End If
 
 
@@ -1711,13 +1612,10 @@ Public Class frmInterface
             End Try
 
             Dim set_value_row As String = ""
-            Dim longblob_filed_contain As Boolean = False
-            Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
-                longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
 
@@ -1731,7 +1629,8 @@ Public Class frmInterface
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
 
-                    If tb_temp_insert.Rows.Count > 0 Then
+                    Dim archivos As New Dictionary(Of String, Byte())()
+                    If tb_temp_insert.Rows.Count = 1 Then
 
                         Dim tb_campos As DataTable
                         tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
@@ -1763,7 +1662,9 @@ Public Class frmInterface
                                 set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
 
                             ElseIf tipo = "longblob" Then
-                                longblob_filed_contain = True
+                                If Not tb_temp_insert.Rows(0).IsNull(col) Then
+                                    archivos.Add(campo_nombre, DirectCast(tb_temp_insert.Rows(0).Item(col), Byte()))
+                                End If
 
                             ElseIf tipo = "int" Then
                                 Dim campo_int As String = ""
@@ -1796,53 +1697,10 @@ Public Class frmInterface
 
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                    Else
-                        If Insert_Central(table_name, _
-                                          set_value) Then
-
-                            If longblob_filed_contain = True Then
-                                Dim tb_longblob As DataTable
-                                tb_longblob = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Type = 'longblob';")
-                                For col_lb As Integer = 0 To tb_longblob.Rows.Count - 1
-                                    name_file_blob = tb_longblob.Rows(col_lb).Item("Field").ToString
-                                    If Not IsDBNull(tb_temp_insert.Rows(0).Item(name_file_blob)) Then
-                                        Try
-                                            Update_FotoSistema_Central(name_file_blob, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(name_file_blob))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                            'Me.lstLog.Items.Add(Calcula_FechaActual)
-                                            'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add("Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                Next
-
-                            End If
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                        Else
-
-                            Dim tb_valida_ins As DataTable
-                            tb_valida_ins = tb_Recordset_MySQL_Central("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
-
-                            If tb_valida_ins.Rows.Count > 0 Then
-                                Update_local("his_replica", _
-                                             "sinc = 0", _
-                                             "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                            End If
-
-                        End If
-
+                    If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
+                        Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                        Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                     End If
 
 
@@ -2052,13 +1910,10 @@ Public Class frmInterface
             End Try
 
             Dim set_value_row As String = ""
-            Dim longblob_filed_contain As Boolean = False
-            Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
-                longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
 
@@ -2072,7 +1927,8 @@ Public Class frmInterface
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
 
-                    If tb_temp_insert.Rows.Count > 0 Then
+                    Dim archivos As New Dictionary(Of String, Byte())()
+                    If tb_temp_insert.Rows.Count = 1 Then
 
                         Dim tb_campos As DataTable
                         tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
@@ -2104,7 +1960,9 @@ Public Class frmInterface
                                 set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
 
                             ElseIf tipo = "longblob" Then
-                                longblob_filed_contain = True
+                                If Not tb_temp_insert.Rows(0).IsNull(col) Then
+                                    archivos.Add(campo_nombre, DirectCast(tb_temp_insert.Rows(0).Item(col), Byte()))
+                                End If
 
                             ElseIf tipo = "int" Then
                                 Dim campo_int As String = ""
@@ -2137,53 +1995,10 @@ Public Class frmInterface
 
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                    Else
-                        If Insert_Central(table_name, _
-                                          set_value) Then
-
-                            If longblob_filed_contain = True Then
-                                Dim tb_longblob As DataTable
-                                tb_longblob = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Type = 'longblob';")
-                                For col_lb As Integer = 0 To tb_longblob.Rows.Count - 1
-                                    name_file_blob = tb_longblob.Rows(col_lb).Item("Field").ToString
-                                    If Not IsDBNull(tb_temp_insert.Rows(0).Item(name_file_blob)) Then
-                                        Try
-                                            Update_FotoSistema_Central(name_file_blob, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(name_file_blob))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                            'Me.lstLog.Items.Add(Calcula_FechaActual)
-                                            'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add("Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                Next
-
-                            End If
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                        Else
-
-                            Dim tb_valida_ins As DataTable
-                            tb_valida_ins = tb_Recordset_MySQL_Central("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
-
-                            If tb_valida_ins.Rows.Count > 0 Then
-                                Update_local("his_replica", _
-                                             "sinc = 0", _
-                                             "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                            End If
-
-                        End If
-
+                    If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
+                        Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                        Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                     End If
 
 
@@ -2388,13 +2203,10 @@ Public Class frmInterface
             End Try
 
             Dim set_value_row As String = ""
-            Dim longblob_filed_contain As Boolean = False
-            Dim name_file_blob As String = ""
 
             For i As Integer = 0 To tb_his_replica_local.Rows.Count - 1
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
 
-                longblob_filed_contain = False
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
 
@@ -2408,7 +2220,8 @@ Public Class frmInterface
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
 
-                    If tb_temp_insert.Rows.Count > 0 Then
+                    Dim archivos As New Dictionary(Of String, Byte())()
+                    If tb_temp_insert.Rows.Count = 1 Then
 
                         Dim tb_campos As DataTable
                         tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
@@ -2440,7 +2253,9 @@ Public Class frmInterface
                                 set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
 
                             ElseIf tipo = "longblob" Then
-                                longblob_filed_contain = True
+                                If Not tb_temp_insert.Rows(0).IsNull(col) Then
+                                    archivos.Add(campo_nombre, DirectCast(tb_temp_insert.Rows(0).Item(col), Byte()))
+                                End If
 
                             ElseIf tipo = "int" Then
                                 Dim campo_int As String = ""
@@ -2473,53 +2288,10 @@ Public Class frmInterface
 
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                    Else
-                        If Insert_Central(table_name, _
-                                          set_value) Then
-
-                            If longblob_filed_contain = True Then
-                                Dim tb_longblob As DataTable
-                                tb_longblob = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Type = 'longblob';")
-                                For col_lb As Integer = 0 To tb_longblob.Rows.Count - 1
-                                    name_file_blob = tb_longblob.Rows(col_lb).Item("Field").ToString
-                                    If Not IsDBNull(tb_temp_insert.Rows(0).Item(name_file_blob)) Then
-                                        Try
-                                            Update_FotoSistema_Central(name_file_blob, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(name_file_blob))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                            'Me.lstLog.Items.Add(Calcula_FechaActual)
-                                            'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add("Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                Next
-
-                            End If
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                        Else
-
-                            Dim tb_valida_ins As DataTable
-                            tb_valida_ins = tb_Recordset_MySQL_Central("Select " & campo_llave & " from " & table_name & " WHERE " & campo_llave & " = '" & campo_llave_value_id & "'")
-
-                            If tb_valida_ins.Rows.Count > 0 Then
-                                Update_local("his_replica", _
-                                             "sinc = 0", _
-                                             "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                            End If
-
-                        End If
-
+                    If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
+                        Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                        Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                     End If
 
 
@@ -2687,17 +2459,62 @@ Public Class frmInterface
     End Sub
 
 
+    ' Un alta solo se confirma cuando la fila y todos sus archivos están en el portal.
+    Private Function CompletarAltaReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As String,
+                                        ByVal valores As String, ByVal datosLocales As DataTable,
+                                        ByVal archivos As Dictionary(Of String, Byte()),
+                                        ByVal insertar As Func(Of String, String, Boolean),
+                                        ByVal consultar As Func(Of String, Object, DataTable),
+                                        ByVal enviarArchivo As Func(Of String, String, String, Object, Byte(), Boolean, Boolean)) As Boolean
+        Dim referencia As String = tabla & ", ID local " & idLocal & ". El movimiento sigue pendiente."
+        If datosLocales.Rows.Count <> 1 OrElse String.IsNullOrEmpty(campoId) OrElse String.IsNullOrWhiteSpace(valores) Then
+            AgregarLog(100, "Réplica: no se pudo leer la fila local para el alta de " & referencia)
+            Return False
+        End If
+
+        Dim guidSistema As Object = Nothing
+        If datosLocales.Columns.Contains("guid_system") AndAlso Not datosLocales.Rows(0).IsNull("guid_system") Then
+            Dim valorGuid As Object = datosLocales.Rows(0)("guid_system")
+            Dim guidBinario As Byte() = TryCast(valorGuid, Byte())
+            If If(guidBinario Is Nothing, Not String.IsNullOrWhiteSpace(valorGuid.ToString()), guidBinario.Length > 0) Then
+                guidSistema = valorGuid
+            End If
+        End If
+
+        If Not insertar(tabla, valores) Then
+            ' Una coincidencia del ID por sí sola no confirma un INSERT rechazado.
+            If guidSistema Is Nothing Then
+                AgregarLog(100, "Réplica: no se confirmó el alta y no hay guid_system para verificar " & referencia)
+                Return False
+            End If
+            Using coincidencia As DataTable = consultar("SELECT 1 FROM " & tabla & " WHERE guid_system = @guid", guidSistema)
+                If coincidencia.Rows.Count <> 1 Then
+                    AgregarLog(100, "Réplica: no se confirmó el alta por guid_system en " & referencia)
+                    Return False
+                End If
+            End Using
+        End If
+
+        Dim campoPortal As String = If(guidSistema Is Nothing, campoId, "guid_system")
+        Dim valorPortal As Object = If(guidSistema, idLocal)
+        For Each archivo As KeyValuePair(Of String, Byte()) In archivos
+            If Not enviarArchivo(archivo.Key, tabla, campoPortal, valorPortal, archivo.Value, True) Then
+                AgregarLog(100, "Réplica: no se completó el envío de " & archivo.Key & " en " & referencia)
+                Return False
+            End If
+        Next
+
+        Return True
+    End Function
+
     ''' <summary>
-    ''' convertir imagen a binario
+    ''' Envía una columna binaria a la fila indicada del portal.
     ''' </summary>
-    ''' <param name="Imagen"></param>
-    ''' <returns></returns>
-    ''' <remarks></remarks>
     Private Function Update_FotoSistema_Central(ByVal Campo As String, ByVal Tabla As String, _
-                                        ByVal IdCampo As String, ByVal IdValor As String, _
-                                        ByVal Imagen As Byte()) As Boolean
+                                        ByVal IdCampo As String, ByVal IdValor As Object, _
+                                        ByVal Imagen As Byte(), Optional ByVal confirmarFila As Boolean = False) As Boolean
         Dim cmdtext As String
-        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = @id"
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
@@ -2708,7 +2525,9 @@ Public Class frmInterface
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_Central)
                     cmm_Comando.Parameters.AddWithValue("?File", Imagen)
-                    cmm_Comando.ExecuteNonQuery()
+                    cmm_Comando.Parameters.AddWithValue("@id", IdValor)
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If confirmarFila AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception
@@ -3696,10 +3515,10 @@ no_insertar_cx:
     End Function
 
     Private Function Update_FotoSistema_CentralAsync(ByVal Campo As String, ByVal Tabla As String, _
-                                       ByVal IdCampo As String, ByVal IdValor As String, _
-                                       ByVal Imagen As Byte()) As Boolean
+                                       ByVal IdCampo As String, ByVal IdValor As Object, _
+                                       ByVal Imagen As Byte(), Optional ByVal confirmarFila As Boolean = False) As Boolean
         Dim cmdtext As String
-        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = @id"
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
@@ -3710,7 +3529,9 @@ no_insertar_cx:
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsync)
                     cmm_Comando.Parameters.AddWithValue("?File", Imagen)
-                    cmm_Comando.ExecuteNonQuery()
+                    cmm_Comando.Parameters.AddWithValue("@id", IdValor)
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If confirmarFila AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception
@@ -3800,7 +3621,7 @@ no_insertar_cx:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_CentralAsyncALM(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_CentralAsyncALM(ByVal Comando As String, Optional ByVal guidSistema As Object = Nothing) As Data.DataTable
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
@@ -3811,6 +3632,7 @@ no_insertar_cx:
             Dim tabla As New DataTable()
             Try
                 Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_CentralAsyncALM)
+                    If guidSistema IsNot Nothing Then comandoCentral.Parameters.AddWithValue("@guid", guidSistema)
                     Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
                         adaptador.Fill(tabla)
                     End Using
@@ -3898,10 +3720,10 @@ no_insertar_cx:
     End Function
 
     Private Function Update_FotoSistema_CentralAsyncALM(ByVal Campo As String, ByVal Tabla As String, _
-                                       ByVal IdCampo As String, ByVal IdValor As String, _
-                                       ByVal Imagen As Byte()) As Boolean
+                                       ByVal IdCampo As String, ByVal IdValor As Object, _
+                                       ByVal Imagen As Byte(), Optional ByVal confirmarFila As Boolean = False) As Boolean
         Dim cmdtext As String
-        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = '" & IdValor & "'"
+        cmdtext = "UPDATE " & Tabla & " set " & Campo & "=?File where " & IdCampo & " = @id"
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
@@ -3912,7 +3734,9 @@ no_insertar_cx:
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(cmdtext, cx_MySQL_CentralAsyncALM)
                     cmm_Comando.Parameters.AddWithValue("?File", Imagen)
-                    cmm_Comando.ExecuteNonQuery()
+                    cmm_Comando.Parameters.AddWithValue("@id", IdValor)
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If confirmarFila AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception
@@ -4002,7 +3826,7 @@ no_insertar_cx:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_Central(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_Central(ByVal Comando As String, Optional ByVal guidSistema As Object = Nothing) As Data.DataTable
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
@@ -4013,6 +3837,7 @@ no_insertar_cx:
             Dim tabla As New DataTable()
             Try
                 Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Central)
+                    If guidSistema IsNot Nothing Then comandoCentral.Parameters.AddWithValue("@guid", guidSistema)
                     Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
                         adaptador.Fill(tabla)
                     End Using

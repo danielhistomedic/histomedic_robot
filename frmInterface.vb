@@ -547,8 +547,18 @@ Public Class frmInterface
 
                 If tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "INSERT" Then
 
+                    Dim esDetalleServicio As Boolean = String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase)
+                    Dim altaConIdDelPortal As Boolean = esDetalleServicio OrElse String.Equals(table_name, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase)
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
                     tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+
+                    If altaConIdDelPortal AndAlso tb_temp_insert.Rows.Count = 1 Then
+                        If Not tb_temp_insert.Columns.Contains("guid_system") OrElse String.IsNullOrWhiteSpace(tb_temp_insert.Rows(0)("guid_system").ToString()) Then
+                            AgregarLog(100, "Réplica: falta guid_system para el alta de " & table_name & ", ID local " & campo_llave_value_id & ". Sigue pendiente.")
+                            Continue For
+                        End If
+                        If esDetalleServicio AndAlso Not ResolverServicioDelDetalle(tb_temp_insert.Rows(0)) Then Continue For
+                    End If
 
                     Dim archivos As New Dictionary(Of String, Byte())()
                     If tb_temp_insert.Rows.Count = 1 Then
@@ -562,6 +572,7 @@ Public Class frmInterface
                         For col As Integer = 0 To tb_campos.Rows.Count - 1
 
                             campo_nombre = tb_campos.Rows(col).Item("Field").ToString
+                            If altaConIdDelPortal AndAlso String.Equals(campo_nombre, campo_llave, StringComparison.OrdinalIgnoreCase) Then Continue For
 
                             Dim tipo As String = ""
                             tipo = tb_campos.Rows(col).Item("Type")
@@ -638,6 +649,8 @@ Public Class frmInterface
                     End If
 
                     Using datosLocales As DataTable = tb_Recordset_MySQL_localAsync("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase) AndAlso
+                           datosLocales.Rows.Count = 1 AndAlso Not ResolverServicioDelDetalle(datosLocales.Rows(0)) Then Continue For
                         If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_CentralAsync) Then
                             Update_CentralAsync("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_localAsync("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -1938,6 +1951,25 @@ Public Class frmInterface
 
     End Sub
 
+
+    Private Function ResolverServicioDelDetalle(ByVal detalle As DataRow) As Boolean
+        Dim idServicioLocal As Long
+        If detalle.Table.Columns.Contains("servicio_id") AndAlso Long.TryParse(detalle("servicio_id").ToString(), idServicioLocal) AndAlso idServicioLocal > 0 Then
+            Using servicioLocal As DataTable = tb_Recordset_MySQL_localAsync("SELECT guid_system FROM tb_servicios_sistemas WHERE id = @idServicio", idServicioLocal)
+                If servicioLocal.Rows.Count = 1 AndAlso Not String.IsNullOrWhiteSpace(servicioLocal.Rows(0)("guid_system").ToString()) Then
+                    Using servicioPortal As DataTable = tb_Recordset_MySQL_CentralAsync("SELECT id FROM tb_servicios_sistemas WHERE guid_system = @guid", servicioLocal.Rows(0)("guid_system"))
+                        If servicioPortal.Rows.Count = 1 Then
+                            ' Solo se modifica la copia en memoria que se enviará al portal.
+                            detalle("servicio_id") = servicioPortal.Rows(0)("id")
+                            Return True
+                        End If
+                    End Using
+                End If
+            End Using
+        End If
+        AgregarLog(100, "Réplica: no se pudo identificar el servicio principal del detalle local " & detalle("id").ToString() & ". Sigue pendiente.")
+        Return False
+    End Function
 
     Private Function CompletarActualizacionReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As Long,
                                                    ByVal datosLocales As DataTable,
@@ -3524,10 +3556,11 @@ intenta_otravz:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_local(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_local(ByVal Comando As String, Optional ByVal claveServicio As Object = Nothing) As Data.DataTable
 
         Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
         Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_local)
+        If claveServicio IsNot Nothing Then cmm_Comando.Parameters.AddWithValue("@clave", claveServicio)
         Dim dt_DataTable As New System.Data.DataTable
         da_Adaptador.SelectCommand = cmm_Comando
         Dim ciclo As Integer = 0
@@ -3605,19 +3638,26 @@ intenta_otravz:
 
     End Function
 
-    Public Function Update_local(ByVal Cadena As String) As Boolean
+    Public Function Update_local(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
 
         Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_local)
+        If parametros IsNot Nothing Then
+            For Each parametro As KeyValuePair(Of String, Object) In parametros
+                cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+            Next
+        End If
         Dim ciclo As Integer = 0
         Try
 intenta_otravz:
             If cx_MySQL_local.State = ConnectionState.Closed Then cx_MySQL_local.Open()
-            cmm_Comando.ExecuteNonQuery()
+            Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+            If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
         Catch ex As Exception
             If cx_MySQL_local.State = ConnectionState.Closed Then
                 ciclo = ciclo + 1
                 If ciclo = 3 Then
                     AgregarLog(500, ex.Message & ", Error al actualizar registro local: " & Cadena)
+                    If parametros IsNot Nothing Then Return False
                     Exit Try
                 End If
                 GoTo intenta_otravz
@@ -3697,10 +3737,11 @@ intenta_otravz:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_localAsync(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_localAsync(ByVal Comando As String, Optional ByVal idServicio As Long? = Nothing) As Data.DataTable
 
         Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
         Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_localAsync)
+        If idServicio.HasValue Then cmm_Comando.Parameters.AddWithValue("@idServicio", idServicio.Value)
         Dim dt_DataTable As New System.Data.DataTable
         da_Adaptador.SelectCommand = cmm_Comando
 
@@ -4984,25 +5025,20 @@ no_insertar:
 
         For i As Integer = 0 To tb_servicios_sistemas.Rows.Count - 1
 
-            '== Obtenemos el id de registro DE PORTAL == ==
-            Dim IdRegistroServicio_It As Integer = 0
-            IdRegistroServicio_It = tb_servicios_sistemas.Rows(i).Item("id").ToString
+            Dim servicio As DataRow = tb_servicios_sistemas.Rows(i)
+            Dim IdRegistroServicio_It As String = servicio("id").ToString()
+            Dim guidServicio As String = If(servicio.Table.Columns.Contains("guid_system"), servicio("guid_system").ToString(), "")
+            Dim usarGuid As Boolean = Not String.IsNullOrWhiteSpace(guidServicio)
+            Dim filtroServicio As String = If(usarGuid, " WHERE guid_system = @clave", " WHERE id = @clave")
+            Dim claveServicio As Object = If(usarGuid, CObj(guidServicio), servicio("id"))
+            Dim existeLocal As Boolean
+            Using servicioLocal As DataTable = tb_Recordset_MySQL_local("SELECT id FROM tb_servicios_sistemas" & filtroServicio, claveServicio)
+                existeLocal = servicioLocal.Rows.Count = 1
+            End Using
 
-            '== Verificamos si el id de servicio de plataforma existe en la DB local == ==
-            Dim tb_temp_servicios As DataTable
-            tb_temp_servicios = tb_Recordset_MySQL_local("Select id from tb_servicios_sistemas where id = '" & IdRegistroServicio_It & "'")
-
-            Dim IdClienteLocal As Integer = 0
-            If tb_temp_servicios.Rows.Count = 0 Then
-
-                LogEventos.Escribir("ADVERTENCIA: El servicio fimado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & " no existe en base de datos local, verifique.")
-
-                If Not Update_Central("tb_servicios_sistemas", _
-                               "sinc = 0", _
-                               "id", IdRegistroServicio_It) Then
-                    LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
-                End If
-
+            If Not existeLocal Then
+                LogEventos.Escribir("No se encontró en local el servicio firmado del portal ID " & IdRegistroServicio_It &
+                                    If(usarGuid, " por GUID.", " por ID.") & " Sigue pendiente.")
             Else
 
                 '== PASO 1: Descargar imagen desde FTP remoto a carpeta temporal == ==
@@ -5070,20 +5106,17 @@ no_insertar:
                     End Try
                 End If
 
-                If Not Update_local("tb_servicios_sistemas", _
-                                     "estatus = '" & tb_servicios_sistemas.Rows(i).Item("estatus").ToString & "', " & _
-                                     "firmado = '" & tb_servicios_sistemas.Rows(i).Item("firmado").ToString & "', " & _
-                                     "ccveusuario_recibe = '" & tb_servicios_sistemas.Rows(i).Item("ccveusuario_recibe").ToString & "', " & _
-                                     "fchregistro_recibe = '" & Format(CDate(tb_servicios_sistemas.Rows(i).Item("fchregistro_recibe").ToString), "yyyy-MM-dd HH:mm:ss") & "', " & _
-                                     "firma_recibe = '" & tb_servicios_sistemas.Rows(i).Item("firma_recibe").ToString & "', " & _
-                                     "foto_servicio = '" & tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString & "', " & _
-                                     "sinc = 0", _
-                                     "id", IdRegistroServicio_It) Then
+                Dim parametrosFirma As New Dictionary(Of String, Object) From {
+                    {"@clave", claveServicio}, {"@estatus", servicio("estatus")}, {"@firmado", servicio("firmado")},
+                    {"@usuario", servicio("ccveusuario_recibe")}, {"@fecha", servicio("fchregistro_recibe")},
+                    {"@firma", servicio("firma_recibe")}, {"@foto", servicio("foto_servicio")}
+                }
+                If Not Update_local("UPDATE tb_servicios_sistemas SET estatus = @estatus, firmado = @firmado, ccveusuario_recibe = @usuario, " &
+                                    "fchregistro_recibe = @fecha, firma_recibe = @firma, foto_servicio = @foto, sinc = 0" & filtroServicio, parametrosFirma) Then
                     LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
                 Else
-                    If Not Update_Central("tb_servicios_sistemas", _
-                              "sinc = 0", _
-                              "id", IdRegistroServicio_It) Then
+                    If Not Update_Central("UPDATE tb_servicios_sistemas SET sinc = 0" & filtroServicio,
+                                          New Dictionary(Of String, Object) From {{"@clave", claveServicio}}) Then
                         LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_servicios_sistemas en el portal con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
                     End If
                 End If

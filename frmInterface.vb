@@ -684,6 +684,13 @@ Public Class frmInterface
                         'Diccionario con las columnas excluidas por tabla
                         Dim columnasExcluidas As New Dictionary(Of String, HashSet(Of String))(StringComparer.OrdinalIgnoreCase) From {
                             {
+                                "tb_ticketsec",
+                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
+                                    "estatus_control_interno",
+                                    "control_interno_correcciones"
+                                }
+                            },
+                            {
                                 "tb_servicios_sistemas",
                                 New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
                                     "ccveusuario_recibe",

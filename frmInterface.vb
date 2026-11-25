@@ -47,6 +47,7 @@ Public Class frmInterface
     ' Los comandos y el cierre de canales centrales usan el mismo bloqueo.
     Private ReadOnly bloqueoConexionCentral As New Object()
     Private ReadOnly bloqueoProcesoSP As New Object()
+    Private ReadOnly borradosSinGuidAvisados As New HashSet(Of String)(StringComparer.Ordinal)
     Private estadoConexionCentral As Integer = 0
     Private comprobacionCentralActiva As Integer = 0
     Private robotActivo As Integer = 0
@@ -530,9 +531,6 @@ Public Class frmInterface
                 If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
 
                 Dim table_name As String = tb_his_replica_local.Rows(i).Item("tabla_afectada").ToString
-                Dim esTablaServicio As Boolean =
-                    String.Equals(table_name, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase) OrElse
-                    String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase)
 
                 Dim set_value As String = ""
 
@@ -633,202 +631,53 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
-                    Dim actualizarPorGuid As Boolean = esTablaServicio
-                    Dim parametrosUpdate As New Dictionary(Of String, Object)()
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
-
-                    If actualizarPorGuid Then
-                        If tb_temp_insert.Rows.Count <> 1 OrElse Not tb_temp_insert.Columns.Contains("guid_system") Then
-                            LogEventos.Escribir("Réplica: no se pudo obtener guid_system local de " & table_name & ", ID " & campo_llave_value_id & ".")
-                            Continue For
-                        End If
-
-                        Dim guidSistema As Object = tb_temp_insert.Rows(0)("guid_system")
-                        Dim guidBinario As Byte() = TryCast(guidSistema, Byte())
-                        If IsDBNull(guidSistema) OrElse
-                            (guidBinario Is Nothing AndAlso String.IsNullOrWhiteSpace(guidSistema.ToString())) OrElse
-                            (guidBinario IsNot Nothing AndAlso guidBinario.Length = 0) Then
-                            LogEventos.Escribir("Réplica: guid_system vacío en " & table_name & ", ID " & campo_llave_value_id & ".")
-                            Continue For
-                        End If
-                        parametrosUpdate.Add("@guid", guidSistema)
+                    Dim idActual As Long
+                    If String.IsNullOrEmpty(campo_llave) OrElse Not Long.TryParse(tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString(), idActual) Then
+                        AgregarLog(100, "Réplica: no se pudo leer la llave local de " & table_name & ". El UPDATE sigue pendiente.")
+                        Continue For
                     End If
 
-                    If tb_temp_insert.Rows.Count > 0 Then
-
-                        Dim tb_campos As DataTable = Nothing
-                        If Not columnCache.TryGetValue(table_name, tb_campos) Then
-                            tb_campos = tb_Recordset_MySQL_localAsync("SHOW COLUMNS FROM " & table_name & ";")
-                            columnCache(table_name) = tb_campos
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsync("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_CentralAsync) Then
+                            Update_CentralAsync("fchactual", "fchActual = current_timestamp", "Id", 1)
+                            Update_localAsync("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
-
-                        'Diccionario con las columnas excluidas por tabla
-                        Dim columnasExcluidas As New Dictionary(Of String, HashSet(Of String))(StringComparer.OrdinalIgnoreCase) From {
-                            {
-                                "tb_ticketsec",
-                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                                    "estatus_control_interno",
-                                    "control_interno_correcciones"
-                                }
-                            },
-                            {
-                                "tb_servicios_sistemas",
-                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                                    "ccveusuario_recibe",
-                                    "firmado",
-                                    "fchregistro_recibe",
-                                    "firma_recibe",
-                                    "sinc",
-                                    "foto_servicio"
-                                }
-                            }
-                        }
-
-                        ',
-                        '    {
-                        '        "tb_pacientes",
-                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                        '            "foto",
-                        '            "huella",
-                        '            "firma"
-                        '        }
-                        '    },
-                        '    {
-                        '        "tb_usuarios",
-                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                        '            "password",
-                        '            "salt",
-                        '            "token"
-                        '        }
-                        '    }
-
-                        Dim columnasExcluir As HashSet(Of String) = Nothing
-
-                        If Not columnasExcluidas.TryGetValue(table_name, columnasExcluir) Then
-                            'Si la tabla no existe en el diccionario, no excluye ninguna columna
-                            columnasExcluir = New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
-                        End If
-
-                        If actualizarPorGuid Then
-                            columnasExcluir.Add("guid_system")
-                            columnasExcluir.Add(campo_llave)
-                        End If
-
-                        For col As Integer = 0 To tb_campos.Rows.Count - 1
-
-                            campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-
-                            'Excluir columnas especÃ­ficas de tb_servicios_sistemas
-                            If columnasExcluir.Contains(campo_nombre) Then
-                                Continue For
-                            End If
-
-                            Dim tipo As String = ""
-                            tipo = tb_campos.Rows(col).Item("Type")
-                            Dim texto_buscar As String = tipo
-                            If texto_buscar.ToLower().Contains("int") Then
-                                tipo = "int"
-                            End If
-
-                            If tipo = "date" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "datetime" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd HH:mm:ss") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "longblob" Then
-
-                                If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    If actualizarPorGuid Then
-                                        Dim parametroBlob As String = "@blob" & col.ToString()
-                                        parametrosUpdate.Add(parametroBlob, tb_temp_insert.Rows(0).Item(col))
-                                        set_value = set_value & " " & campo_nombre & " = " & parametroBlob & ", "
-                                    Else
-                                        Try
-                                            Update_FotoSistema_CentralAsync(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                        Catch ex As Exception
-                                            AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                        End Try
-                                    End If
-                                End If
-
-                            ElseIf tipo = "int" Then
-
-                                Dim campo_int As String = ""
-                                Try
-
-                                    If tb_temp_insert.Rows(0).Item(col).ToString = "" Then
-                                        campo_int = "null"
-                                    Else
-                                        campo_int = tb_temp_insert.Rows(0).Item(col).ToString
-                                    End If
-                                Catch ex As Exception
-                                    campo_int = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & campo_int & ", "
-
-                            Else
-
-                                set_value_row = ""
-                                set_value_row = tb_temp_insert.Rows(0).Item(col).ToString
-                                set_value_row = set_value_row.Replace("'", "\'")
-                                set_value = set_value & " " & campo_nombre & " = '" & set_value_row & "', "
-                            End If
-
-                        Next
-
-                        Dim caracterARemover As Char = " "
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover})
-
-                        Dim caracterARemover_coma As Char = ","
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover_coma})
-
-                    End If
-
-                    If set_value = "" Then
-                        Update_localAsync("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                    Else
-                        Dim actualizado As Boolean
-                        If actualizarPorGuid Then
-                            Dim sqlUpdate As String = "UPDATE " & table_name & " SET " & set_value &
-                                " WHERE guid_system = @guid"
-                            actualizado = Update_CentralAsync(sqlUpdate, parametrosUpdate)
-                        Else
-                            actualizado = Update_CentralAsync(table_name, set_value, campo_llave, campo_llave_value_id)
-                        End If
-
-                        If actualizado Then
-
-                            Update_CentralAsync("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_localAsync("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-                        End If
-                    End If
+                    End Using
 
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "DELETE" Then
 
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
+                    Dim eliminado As Boolean
+                    Select Case table_name.ToLowerInvariant()
+                        Case "tb_servicios_sistemas", "tb_servicios_sistemas_detalle"
+                            Dim movimiento As DataRow = tb_his_replica_local.Rows(i)
+                            If Not movimiento.Table.Columns.Contains("guid_system") OrElse
+                               String.IsNullOrWhiteSpace(movimiento("guid_system").ToString()) Then
+                                Dim idMovimiento As String = movimiento("id").ToString()
+                                Dim primerAviso As Boolean
+                                SyncLock borradosSinGuidAvisados
+                                    primerAviso = borradosSinGuidAvisados.Add(idMovimiento)
+                                End SyncLock
+                                If primerAviso Then
+                                    AgregarLog(100, "Réplica: falta guid_system para el DELETE de " & table_name &
+                                               ", movimiento " & idMovimiento & ". Sigue pendiente.")
+                                End If
+                                Continue For
+                            End If
 
-                    If Delete_CentralAsync("DELETE FROM " & table_name & " WHERE " & campo_llave & " = " & campo_llave_value_id) Then
+                            ' Con un GUID único, cero filas significa que el registro ya está ausente.
+                            eliminado = Delete_CentralAsync("DELETE FROM " & table_name & " WHERE guid_system = @guid",
+                                                            movimiento("guid_system").ToString())
+                            If Not eliminado Then
+                                AgregarLog(100, "Réplica: no se completó el DELETE de " & table_name &
+                                           ", movimiento " & movimiento("id").ToString() & ". Sigue pendiente.")
+                            End If
+                        Case Else
+                            campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
+                            eliminado = Delete_CentralAsync("DELETE FROM " & table_name & " WHERE " & campo_llave & " = " & campo_llave_value_id)
+                    End Select
+
+                    If eliminado Then
 
                         Update_CentralAsync("fchactual", _
                                        "fchActual = current_timestamp", _
@@ -1045,137 +894,18 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_localAsyncALM("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
-
-                    If tb_temp_insert.Rows.Count > 0 Then
-
-                        Dim tb_campos As DataTable = Nothing
-                        If Not columnCache.TryGetValue(table_name, tb_campos) Then
-                            tb_campos = tb_Recordset_MySQL_localAsyncALM("SHOW COLUMNS FROM " & table_name & ";")
-                            columnCache(table_name) = tb_campos
-                        End If
-
-
-                        'Diccionario con las columnas excluidas por tabla
-                        Dim columnasExcluidas As New Dictionary(Of String, HashSet(Of String))(StringComparer.OrdinalIgnoreCase) From {
-                            {
-                                "tb_almacen_existencias_series2",
-                                New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                                    "foto",
-                                    "sinc"
-                                }
-                            }
-                        }
-                        ',
-                        '    {
-                        '        "tb_pacientes",
-                        '        New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {
-                        '            "foto",
-                        '            "huella",
-                        '            "firma"
-                        '        }
-                        '    },
-
-                        Dim columnasExcluir As HashSet(Of String) = Nothing
-
-                        If Not columnasExcluidas.TryGetValue(table_name, columnasExcluir) Then
-                            'Si la tabla no existe en el diccionario, no excluye ninguna columna
-                            columnasExcluir = New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
-                        End If
-
-                        For col As Integer = 0 To tb_campos.Rows.Count - 1
-
-                            campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-
-                            'Excluir columnas especÃ­ficas de tb_servicios_sistemas
-                            If columnasExcluir.Contains(campo_nombre) Then
-                                Continue For
-                            End If
-
-                            Dim tipo As String = ""
-                            tipo = tb_campos.Rows(col).Item("Type")
-                            Dim texto_buscar As String = tipo
-                            If texto_buscar.ToLower().Contains("int") Then
-                                tipo = "int"
-                            End If
-
-                            If tipo = "date" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "datetime" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd HH:mm:ss") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "longblob" Then
-
-                                If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    Try
-                                        Update_FotoSistema_CentralAsyncALM(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                    Catch ex As Exception
-                                        AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                    End Try
-                                End If
-
-                            ElseIf tipo = "int" Then
-                                Dim campo_int As String = ""
-                                Try
-                                    If tb_temp_insert.Rows(0).Item(col).ToString = "" Then
-                                        campo_int = "null"
-                                    Else
-                                        campo_int = tb_temp_insert.Rows(0).Item(col).ToString
-                                    End If
-                                Catch ex As Exception
-                                    campo_int = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & campo_int & ", "
-
-                            Else
-
-                                set_value_row = ""
-                                set_value_row = tb_temp_insert.Rows(0).Item(col).ToString
-                                set_value_row = set_value_row.Replace("'", "\'")
-                                set_value = set_value & " " & campo_nombre & " = '" & set_value_row & "', "
-                            End If
-
-                        Next
-
-                        Dim caracterARemover As Char = " "
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover})
-
-                        Dim caracterARemover_coma As Char = ","
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover_coma})
-
+                    Dim idActual As Long
+                    If String.IsNullOrEmpty(campo_llave) OrElse Not Long.TryParse(tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString(), idActual) Then
+                        AgregarLog(100, "Réplica: no se pudo leer la llave local de " & table_name & ". El UPDATE sigue pendiente.")
+                        Continue For
                     End If
 
-                    If set_value = "" Then
-                        Update_localAsyncALM("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                    Else
-                        If Update_CentralAsyncALM(table_name, _
-                                       set_value, _
-                                       campo_llave, campo_llave_value_id) Then
-
-                            Update_CentralAsyncALM("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_localAsyncALM("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsyncALM("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_CentralAsyncALM) Then
+                            Update_CentralAsyncALM("fchactual", "fchActual = current_timestamp", "Id", 1)
+                            Update_localAsyncALM("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
-                    End If
+                    End Using
 
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "DELETE" Then
@@ -1706,103 +1436,21 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
-                    Dim tb_campo_llave As DataTable
-                    tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
-                    campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
-
-                    If tb_temp_insert.Rows.Count > 0 Then
-
-                        Dim tb_campos As DataTable
-                        tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
-                        For col As Integer = 0 To tb_campos.Rows.Count - 1
-
-                            campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-
-                            Dim tipo As String = ""
-                            tipo = tb_campos.Rows(col).Item("Type")
-                            Dim texto_buscar As String = tipo
-                            If texto_buscar.ToLower().Contains("int") Then
-                                tipo = "int"
-                            End If
-
-                            If tipo = "date" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "datetime" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd HH:mm:ss") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "longblob" Then
-
-                                If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    Try
-                                        Update_FotoSistema_Central(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                    Catch ex As Exception
-                                        AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                    End Try
-                                End If
-
-                            ElseIf tipo = "int" Then
-                                Dim campo_int As String = ""
-                                Try
-                                    If tb_temp_insert.Rows(0).Item(col).ToString = "" Then
-                                        campo_int = "null"
-                                    Else
-                                        campo_int = tb_temp_insert.Rows(0).Item(col).ToString
-                                    End If
-                                Catch ex As Exception
-                                    campo_int = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & campo_int & ", "
-
-                            Else
-
-                                set_value_row = ""
-                                set_value_row = tb_temp_insert.Rows(0).Item(col).ToString
-                                set_value_row = set_value_row.Replace("'", "\'")
-                                set_value = set_value & " " & campo_nombre & " = '" & set_value_row & "', "
-                            End If
-
-                        Next
-
-                        Dim caracterARemover As Char = " "
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover})
-
-                        Dim caracterARemover_coma As Char = ","
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover_coma})
-
+                    Using esquema As DataTable = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
+                        campo_llave = If(esquema.Rows.Count = 1, esquema.Rows(0).Item("Field").ToString(), "")
+                    End Using
+                    Dim idActual As Long
+                    If String.IsNullOrEmpty(campo_llave) OrElse Not Long.TryParse(tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString(), idActual) Then
+                        AgregarLog(100, "Réplica: no se pudo leer la llave local de " & table_name & ". El UPDATE sigue pendiente.")
+                        Continue For
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                    Else
-                        If Update_Central(table_name, _
-                                       set_value, _
-                                       campo_llave, campo_llave_value_id) Then
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                            Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                            Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
-                    End If
+                    End Using
 
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "DELETE" Then
@@ -2004,104 +1652,21 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
-                    Dim tb_campo_llave As DataTable
-                    tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
-                    campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
-
-                    If tb_temp_insert.Rows.Count > 0 Then
-
-                        Dim tb_campos As DataTable
-                        tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
-                        For col As Integer = 0 To tb_campos.Rows.Count - 1
-
-                            campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-
-                            Dim tipo As String = ""
-                            tipo = tb_campos.Rows(col).Item("Type")
-                            Dim texto_buscar As String = tipo
-                            If texto_buscar.ToLower().Contains("int") Then
-                                tipo = "int"
-                            End If
-
-                            If tipo = "date" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "datetime" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd HH:mm:ss") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "longblob" Then
-
-                                If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    Try
-                                        Update_FotoSistema_Central(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                    Catch ex As Exception
-                                        AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                    End Try
-                                End If
-
-                            ElseIf tipo = "int" Then
-                                Dim campo_int As String = ""
-                                Try
-                                    If tb_temp_insert.Rows(0).Item(col).ToString = "" Then
-                                        campo_int = "null"
-                                    Else
-                                        campo_int = tb_temp_insert.Rows(0).Item(col).ToString
-                                    End If
-                                Catch ex As Exception
-                                    campo_int = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & campo_int & ", "
-
-                            Else
-
-                                set_value_row = ""
-                                set_value_row = tb_temp_insert.Rows(0).Item(col).ToString
-                                set_value_row = set_value_row.Replace("'", "\'")
-                                set_value = set_value & " " & campo_nombre & " = '" & set_value_row & "', "
-                                'set_value = set_value & " " & campo_nombre & " = '" & tb_temp_insert.Rows(0).Item(col).ToString & "', "
-                            End If
-
-                        Next
-
-                        Dim caracterARemover As Char = " "
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover})
-
-                        Dim caracterARemover_coma As Char = ","
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover_coma})
-
+                    Using esquema As DataTable = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
+                        campo_llave = If(esquema.Rows.Count = 1, esquema.Rows(0).Item("Field").ToString(), "")
+                    End Using
+                    Dim idActual As Long
+                    If String.IsNullOrEmpty(campo_llave) OrElse Not Long.TryParse(tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString(), idActual) Then
+                        AgregarLog(100, "Réplica: no se pudo leer la llave local de " & table_name & ". El UPDATE sigue pendiente.")
+                        Continue For
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                    Else
-                        If Update_Central(table_name, _
-                                       set_value, _
-                                       campo_llave, campo_llave_value_id) Then
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                            Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                            Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
-                    End If
+                    End Using
 
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "DELETE" Then
@@ -2297,106 +1862,21 @@ Public Class frmInterface
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "UPDATE" Then
 
-                    Dim tb_campo_llave As DataTable
-                    tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
-                    campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
-                    campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
-
-                    If tb_temp_insert.Rows.Count > 0 Then
-
-                        Dim tb_campos As DataTable
-                        tb_campos = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & ";")
-                        For col As Integer = 0 To tb_campos.Rows.Count - 1
-
-                            campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-
-                            Dim tipo As String = ""
-                            tipo = tb_campos.Rows(col).Item("Type")
-                            Dim texto_buscar As String = tipo
-                            If texto_buscar.ToLower().Contains("int") Then
-                                tipo = "int"
-                            End If
-
-                            If tipo = "date" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "datetime" Then
-                                Try
-                                    fecha_str = "'" & Format(CDate(tb_temp_insert.Rows(0).Item(col).ToString), "yyyy-MM-dd HH:mm:ss") & "'"
-                                Catch ex As Exception
-                                    fecha_str = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & fecha_str & ", "
-
-                            ElseIf tipo = "longblob" Then
-
-                                If Not IsDBNull(tb_temp_insert.Rows(0).Item(col)) Then
-                                    Try
-                                        Update_FotoSistema_Central(campo_nombre, table_name, campo_llave, campo_llave_value_id, tb_temp_insert.Rows(0).Item(col))
-                                    Catch ex As Exception
-                                        AgregarLog(500, "Error desconocido en Exportar Data: " & ex.Message)
-                                        'Me.lstLog.Items.Add(Calcula_FechaActual)
-                                        'Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add("Error desconocido en Exportar Data: " & ex.Message)
-                                    End Try
-                                End If
-
-                            ElseIf tipo = "int" Then
-                                Dim campo_int As String = ""
-                                Try
-                                    If tb_temp_insert.Rows(0).Item(col).ToString = "" Then
-                                        campo_int = "null"
-                                    Else
-                                        campo_int = tb_temp_insert.Rows(0).Item(col).ToString
-                                    End If
-                                Catch ex As Exception
-                                    campo_int = "null"
-                                End Try
-                                set_value = set_value & " " & campo_nombre & " = " & campo_int & ", "
-
-                            Else
-
-                                set_value_row = ""
-                                set_value_row = tb_temp_insert.Rows(0).Item(col).ToString
-                                set_value_row = set_value_row.Replace("'", "\'")
-                                set_value = set_value & " " & campo_nombre & " = '" & set_value_row & "', "
-                                'set_value = set_value & " " & campo_nombre & " = '" & tb_temp_insert.Rows(0).Item(col).ToString & "', "
-                            End If
-
-                        Next
-
-                        Dim caracterARemover As Char = " "
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover})
-
-                        Dim caracterARemover_coma As Char = ","
-                        set_value = set_value.TrimEnd(New Char() {caracterARemover_coma})
-
+                    Using esquema As DataTable = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
+                        campo_llave = If(esquema.Rows.Count = 1, esquema.Rows(0).Item("Field").ToString(), "")
+                    End Using
+                    Dim idActual As Long
+                    If String.IsNullOrEmpty(campo_llave) OrElse Not Long.TryParse(tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString(), idActual) Then
+                        AgregarLog(100, "Réplica: no se pudo leer la llave local de " & table_name & ". El UPDATE sigue pendiente.")
+                        Continue For
                     End If
 
-                    If set_value = "" Then
-                        Update_local("his_replica", _
-                                     "sinc = 0", _
-                                     "id", tb_his_replica_local.Rows(i).Item("id").ToString)
-
-                    Else
-                        If Update_Central(table_name, _
-                                       set_value, _
-                                       campo_llave, campo_llave_value_id) Then
-
-                            Update_Central("fchactual", _
-                                           "fchActual = current_timestamp", _
-                                           "Id", 1)
-
-                            Update_local("his_replica", _
-                                         "sinc = 0", _
-                                         "id", tb_his_replica_local.Rows(i).Item("id").ToString)
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                            Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
+                            Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
-                    End If
+                    End Using
 
 
                 ElseIf tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "DELETE" Then
@@ -2458,6 +1938,67 @@ Public Class frmInterface
 
     End Sub
 
+
+    Private Function CompletarActualizacionReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As Long,
+                                                   ByVal datosLocales As DataTable,
+                                                   ByVal actualizar As Func(Of String, Dictionary(Of String, Object), Boolean)) As Boolean
+        Dim referencia As String = tabla & ", ID local " & idLocal & ". El movimiento sigue pendiente."
+        If datosLocales.Rows.Count <> 1 Then
+            AgregarLog(100, "Réplica: no se pudo leer una fila local para el UPDATE de " & referencia)
+            Return False
+        End If
+
+        Dim fila As DataRow = datosLocales.Rows(0)
+        Dim campoPortal As String = campoId
+        Dim clavePortal As Object = idLocal
+        Dim excluidas As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {campoId, "guid_system"}
+        Select Case tabla.ToLowerInvariant()
+            Case "tb_servicios_sistemas"
+                excluidas.UnionWith({"ccveusuario_recibe", "firmado", "fchregistro_recibe", "firma_recibe", "sinc", "foto_servicio"})
+            Case "tb_ticketsec"
+                excluidas.UnionWith({"estatus_control_interno", "control_interno_correcciones"})
+            Case "tb_almacen_existencias_series2"
+                excluidas.UnionWith({"foto", "sinc"})
+        End Select
+
+        If datosLocales.Columns.Contains("guid_system") Then
+            Dim guidSistema As Object = fila("guid_system")
+            Dim guidBinario As Byte() = TryCast(guidSistema, Byte())
+            If IsDBNull(guidSistema) OrElse
+                If(guidBinario Is Nothing, String.IsNullOrWhiteSpace(guidSistema.ToString()), guidBinario.Length = 0) Then
+                AgregarLog(100, "Réplica: falta el guid_system para el UPDATE de " & referencia)
+                Return False
+            End If
+            campoPortal = "guid_system"
+            clavePortal = guidSistema
+        ElseIf String.Equals(tabla, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(tabla, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase) Then
+            AgregarLog(100, "Réplica: falta la columna guid_system para el UPDATE de " & referencia)
+            Return False
+        End If
+
+        ' Los datos y archivos se actualizan en la misma sentencia, incluidos los archivos borrados (NULL).
+        Dim parametros As New Dictionary(Of String, Object) From {{"@clave", clavePortal}}
+        Dim asignaciones As New List(Of String)()
+        For Each columna As DataColumn In datosLocales.Columns
+            If excluidas.Contains(columna.ColumnName) Then Continue For
+            Dim parametro As String = "@valor" & asignaciones.Count.ToString()
+            asignaciones.Add("`" & columna.ColumnName.Replace("`", "``") & "` = " & parametro)
+            parametros.Add(parametro, fila(columna))
+        Next
+
+        If asignaciones.Count = 0 Then
+            AgregarLog(100, "Réplica: no hay columnas para el UPDATE de " & referencia)
+            Return False
+        End If
+        Dim sql As String = "UPDATE `" & tabla.Replace("`", "``") & "` SET " & String.Join(", ", asignaciones) &
+                            " WHERE `" & campoPortal.Replace("`", "``") & "` = @clave"
+        If Not actualizar(sql, parametros) Then
+            AgregarLog(100, "Réplica: no se confirmó el UPDATE de " & referencia)
+            Return False
+        End If
+        Return True
+    End Function
 
     ' Un alta solo se confirma cuando la fila y todos sus archivos están en el portal.
     Private Function CompletarAltaReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As String,
@@ -2570,16 +2111,22 @@ Public Class frmInterface
 
     Public Async Sub AgregarLog(ByVal tiempo As Integer, ByVal error_s As String)
 
-        ' Introducir un retraso de 2 segundos (2000 milisegundos)
+        If String.IsNullOrWhiteSpace(error_s) Then Return
+
         Await System.Threading.Tasks.Task.Delay(tiempo)
 
         Try
+            Dim agregarFila As Action =
+                Sub()
+                    Dim fila As New System.Windows.Forms.ListViewItem(Calcula_FechaActual().ToString())
+                    fila.SubItems.Add(error_s)
+                    lstLog.Items.Add(fila)
+                End Sub
+
             If lstLog.InvokeRequired Then
-                lstLog.Invoke(Sub() lstLog.Items.Add(Calcula_FechaActual.ToString))
-                lstLog.Invoke(Sub() Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(error_s))
+                lstLog.Invoke(agregarFila)
             Else
-                Me.lstLog.Items.Add(Calcula_FechaActual)
-                Me.lstLog.Items(lstLog.Items.Count - 1).SubItems.Add(error_s)
+                agregarFila()
             End If
         Catch ex2 As Exception
             LogEventos.Escribir("AgregarLog. " & ex2.Message)
@@ -3449,10 +2996,7 @@ no_insertar_cx:
                         Next
                     End If
                     Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
-                    If parametros IsNot Nothing AndAlso filas = 0 Then
-                        LogEventos.Escribir("Réplica: el guid_system no encontró una fila en el portal. El movimiento sigue pendiente.")
-                        Return False
-                    End If
+                    If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception
@@ -3541,7 +3085,7 @@ no_insertar_cx:
         End SyncLock
     End Function
 
-    Public Function Delete_CentralAsync(ByVal Cadena As String) As Boolean
+    Public Function Delete_CentralAsync(ByVal Cadena As String, Optional ByVal guidSistema As String = Nothing) As Boolean
 
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
@@ -3552,6 +3096,7 @@ no_insertar_cx:
             End If
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsync)
+                    If guidSistema IsNot Nothing Then cmm_Comando.Parameters.AddWithValue("@guid", guidSistema)
                     cmm_Comando.ExecuteNonQuery()
                 End Using
                 Return True
@@ -3646,7 +3191,7 @@ no_insertar_cx:
         End SyncLock
     End Function
 
-    Public Function Update_CentralAsyncALM(ByVal Cadena As String) As Boolean
+    Public Function Update_CentralAsyncALM(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
 
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
@@ -3657,7 +3202,13 @@ no_insertar_cx:
             End If
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_CentralAsyncALM)
-                    cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing Then
+                        For Each parametro As KeyValuePair(Of String, Object) In parametros
+                            cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+                        Next
+                    End If
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception
@@ -3851,7 +3402,7 @@ no_insertar_cx:
         End SyncLock
     End Function
 
-    Public Function Update_Central(ByVal Cadena As String) As Boolean
+    Public Function Update_Central(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
 
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return False
         SyncLock bloqueoConexionCentral
@@ -3862,7 +3413,13 @@ no_insertar_cx:
             End If
             Try
                 Using cmm_Comando As New MySqlConnector.MySqlCommand(Cadena, cx_MySQL_Central)
-                    cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing Then
+                        For Each parametro As KeyValuePair(Of String, Object) In parametros
+                            cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+                        Next
+                    End If
+                    Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                    If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
                 End Using
                 Return True
             Catch ex As Exception

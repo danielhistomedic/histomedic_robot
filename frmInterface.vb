@@ -47,6 +47,8 @@ Public Class frmInterface
     ' Los comandos y el cierre de canales centrales usan el mismo bloqueo.
     Private ReadOnly bloqueoConexionCentral As New Object()
     Private ReadOnly bloqueoProcesoSP As New Object()
+    Private limiteRegistrosExportacion As Integer = 2000
+    Private ReadOnly ultimoIdDescargaPortal As New Dictionary(Of String, Long)(StringComparer.OrdinalIgnoreCase)
     Private ReadOnly borradosSinGuidAvisados As New HashSet(Of String)(StringComparer.Ordinal)
     Private estadoConexionCentral As Integer = 0
     Private comprobacionCentralActiva As Integer = 0
@@ -375,6 +377,11 @@ Public Class frmInterface
             '- - Servicios de Sistemas y Servicios Generales - - - - - - - - - - -
             If CentralDisponible AndAlso Interlocked.CompareExchange(robotActivo, 0, 0) = 1 Then
                 Try
+                    ImportarTablasPortal()
+                Catch ex As Exception
+                    LogEventos.Escribir("ImportarTablasPortal. " & ex.GetType().Name)
+                End Try
+                Try
                     ImportarFirmasRecibido()
                 Catch ex As Exception
                     LogEventos.Escribir("ImportarFirmasRecibido. " & ex.Message)
@@ -454,6 +461,15 @@ Public Class frmInterface
 
     End Sub
 
+    Private Sub txtLimitRegistros_TextChanged(ByVal sender As Object, ByVal e As EventArgs) Handles txtLimitRegistros.TextChanged
+        Dim texto As String = txtLimitRegistros.Text
+        Dim limite As Integer
+        If Not Integer.TryParse(texto, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, limite) OrElse limite <= 0 Then
+            limite = 2000
+        End If
+        Volatile.Write(limiteRegistrosExportacion, limite)
+    End Sub
+
     Private Sub ExportarDataToHostingSP_Load(token As CancellationToken)
 
         While Not token.IsCancellationRequested
@@ -475,10 +491,7 @@ Public Class frmInterface
         If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
         Try
 
-            Dim limittext As String = Me.txtLimitRegistros.Text.Trim
-            If Len(Me.txtLimitRegistros.Text) = 0 Then
-                limittext = 2000
-            End If
+            Dim limittext As String = Volatile.Read(limiteRegistrosExportacion).ToString(System.Globalization.CultureInfo.InvariantCulture)
 
             Dim tb_his_replica_local As DataTable
             tb_his_replica_local = tb_Recordset_MySQL_localAsync("Select * from his_replica " & _
@@ -572,7 +585,8 @@ Public Class frmInterface
                         For col As Integer = 0 To tb_campos.Rows.Count - 1
 
                             campo_nombre = tb_campos.Rows(col).Item("Field").ToString
-                            If altaConIdDelPortal AndAlso String.Equals(campo_nombre, campo_llave, StringComparison.OrdinalIgnoreCase) Then Continue For
+                            If altaConIdDelPortal AndAlso (String.Equals(campo_nombre, campo_llave, StringComparison.OrdinalIgnoreCase) OrElse
+                                                         String.Equals(campo_nombre, "sinc_system", StringComparison.OrdinalIgnoreCase)) Then Continue For
 
                             Dim tipo As String = ""
                             tipo = tb_campos.Rows(col).Item("Type")
@@ -755,10 +769,7 @@ Public Class frmInterface
         If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse (cts IsNot Nothing AndAlso cts.IsCancellationRequested) Then Return
         Try
 
-            Dim limittext As String = Me.txtLimitRegistros.Text.Trim
-            If Len(Me.txtLimitRegistros.Text) = 0 Then
-                limittext = 2000
-            End If
+            Dim limittext As String = Volatile.Read(limiteRegistrosExportacion).ToString(System.Globalization.CultureInfo.InvariantCulture)
 
             Dim tb_his_replica_local As DataTable
             tb_his_replica_local = tb_Recordset_MySQL_localAsyncALM("Select * from his_replica " & _
@@ -978,6 +989,11 @@ Public Class frmInterface
         End Try
 
     End Sub
+
+    Private Function GetQuery_TablasPortal() As String()
+        ' Procesar primero la cabecera para poder resolver servicio_id del detalle.
+        Return {"tb_servicios_sistemas", "tb_servicios_sistemas_detalle"}
+    End Function
 
     Private Function GetQuery_TablasMedicas() As String
 
@@ -1320,10 +1336,7 @@ Public Class frmInterface
             'Dim random As New Random() ' Crea una instancia de la clase Random
             'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
-            Dim limittext As String = Me.txtLimitRegistros.Text.Trim
-            If Len(Me.txtLimitRegistros.Text) = 0 Then
-                limittext = 2000
-            End If
+            Dim limittext As String = Volatile.Read(limiteRegistrosExportacion).ToString(System.Globalization.CultureInfo.InvariantCulture)
 
             Dim tb_his_replica_local As DataTable
             tb_his_replica_local = tb_Recordset_MySQL_local("Select * from his_replica " & _
@@ -1536,10 +1549,7 @@ Public Class frmInterface
             'Dim random As New Random() ' Crea una instancia de la clase Random
             'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
-            Dim limittext As String = Me.txtLimitRegistros.Text.Trim
-            If Len(Me.txtLimitRegistros.Text) = 0 Then
-                limittext = 2000
-            End If
+            Dim limittext As String = Volatile.Read(limiteRegistrosExportacion).ToString(System.Globalization.CultureInfo.InvariantCulture)
 
             Dim tb_his_replica_local As DataTable
             tb_his_replica_local = tb_Recordset_MySQL_local("Select * from his_replica " & _
@@ -1746,10 +1756,7 @@ Public Class frmInterface
             'Dim random As New Random() ' Crea una instancia de la clase Random
             'Dim randomNumber As Integer = random.Next(3000, 5000) ' Genera un número aleatorio entre 1 y 9 (inclusive)
             'Threading.Thread.Sleep(randomNumber)
-            Dim limittext As String = Me.txtLimitRegistros.Text.Trim
-            If Len(Me.txtLimitRegistros.Text) = 0 Then
-                limittext = 2000
-            End If
+            Dim limittext As String = Volatile.Read(limiteRegistrosExportacion).ToString(System.Globalization.CultureInfo.InvariantCulture)
 
             Dim tb_his_replica_local As DataTable
             tb_his_replica_local = tb_Recordset_MySQL_local("Select * from his_replica " & _
@@ -1986,7 +1993,9 @@ Public Class frmInterface
         Dim excluidas As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase) From {campoId, "guid_system"}
         Select Case tabla.ToLowerInvariant()
             Case "tb_servicios_sistemas"
-                excluidas.UnionWith({"ccveusuario_recibe", "firmado", "fchregistro_recibe", "firma_recibe", "sinc", "foto_servicio"})
+                excluidas.UnionWith({"ccveusuario_recibe", "firmado", "fchregistro_recibe", "firma_recibe", "sinc", "foto_servicio", "sinc_system"})
+            Case "tb_servicios_sistemas_detalle"
+                excluidas.Add("sinc_system")
             Case "tb_ticketsec"
                 excluidas.UnionWith({"estatus_control_interno", "control_interno_correcciones"})
             Case "tb_almacen_existencias_series2"
@@ -2025,6 +2034,11 @@ Public Class frmInterface
         End If
         Dim sql As String = "UPDATE `" & tabla.Replace("`", "``") & "` SET " & String.Join(", ", asignaciones) &
                             " WHERE `" & campoPortal.Replace("`", "``") & "` = @clave"
+        If String.Equals(tabla, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase) OrElse
+           String.Equals(tabla, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase) Then
+            ' Un cambio marcado en el portal tiene prioridad hasta completar su descarga.
+            sql &= " AND NOT (sinc_system <=> 1)"
+        End If
         If Not actualizar(sql, parametros) Then
             AgregarLog(100, "Réplica: no se confirmó el UPDATE de " & referencia)
             Return False
@@ -3409,7 +3423,8 @@ no_insertar_cx:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_Central(ByVal Comando As String, Optional ByVal guidSistema As Object = Nothing) As Data.DataTable
+    Public Function tb_Recordset_MySQL_Central(ByVal Comando As String, Optional ByVal valorFiltro As Object = Nothing,
+                                              Optional ByVal nombreParametro As String = "@guid") As Data.DataTable
         If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
         SyncLock bloqueoConexionCentral
             If Interlocked.CompareExchange(cerrandoRobot, 0, 0) <> 0 OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 OrElse Not CentralDisponible Then Return New DataTable()
@@ -3420,7 +3435,7 @@ no_insertar_cx:
             Dim tabla As New DataTable()
             Try
                 Using comandoCentral As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_Central)
-                    If guidSistema IsNot Nothing Then comandoCentral.Parameters.AddWithValue("@guid", guidSistema)
+                    If valorFiltro IsNot Nothing Then comandoCentral.Parameters.AddWithValue(nombreParametro, valorFiltro)
                     Using adaptador As New MySqlConnector.MySqlDataAdapter(comandoCentral)
                         adaptador.Fill(tabla)
                     End Using
@@ -5001,9 +5016,139 @@ no_insertar:
 
 
     ''' <summary>
-    ''' Importar Firmas Recibido
+    ''' Descarga cambios del portal solicitados con sinc_system.
     ''' </summary>
     ''' <remarks></remarks>
+    Private Sub ImportarTablasPortal()
+        Dim tablas As String() = GetQuery_TablasPortal()
+        Dim triggersValidados As Boolean = False
+
+        For Each tabla As String In tablas
+            Dim ultimoId As Long
+            ultimoIdDescargaPortal.TryGetValue(tabla, ultimoId)
+            Using pendientes As DataTable = tb_Recordset_MySQL_Central(
+                "SELECT * FROM " & tabla & " WHERE sinc_system = 1 AND guid_system IS NOT NULL " &
+                "AND TRIM(guid_system) <> '' AND id > @id ORDER BY id LIMIT 50", ultimoId, "@id")
+                If pendientes.Rows.Count = 0 Then
+                    ultimoIdDescargaPortal(tabla) = 0
+                    Continue For
+                End If
+                If Not triggersValidados Then
+                    If Not ValidarTriggersDescargaPortal(tablas) Then
+                        LogEventos.Escribir("ImportarTablasPortal: falta la protección contra reenvíos en los triggers locales.")
+                        Return
+                    End If
+                    triggersValidados = True
+                End If
+                For Each pendiente As DataRow In pendientes.Rows
+                    If Not CentralDisponible OrElse Interlocked.CompareExchange(robotActivo, 0, 0) = 0 Then Return
+                    Dim referencia As String = tabla & ", ID portal " & pendiente("id").ToString()
+                    Try
+                        If Not ImportarRegistroPortal(tabla, pendiente) Then
+                            LogEventos.Escribir("ImportarTablasPortal: " & referencia & ". Sigue pendiente.")
+                        End If
+                    Catch ex As Exception
+                        LogEventos.Escribir("ImportarTablasPortal: " & referencia & ". Sigue pendiente. " & ex.GetType().Name)
+                    End Try
+                    ultimoIdDescargaPortal(tabla) = CLng(pendiente("id"))
+                Next
+                If pendientes.Rows.Count < 50 Then ultimoIdDescargaPortal(tabla) = 0
+            End Using
+        Next
+    End Sub
+
+    Private Function ValidarTriggersDescargaPortal(ByVal tablas As String()) As Boolean
+        Using triggers As DataTable = tb_Recordset_MySQL_local(
+            "SELECT EVENT_OBJECT_TABLE, EVENT_MANIPULATION FROM information_schema.TRIGGERS " &
+            "WHERE TRIGGER_SCHEMA = DATABASE() AND ACTION_TIMING = 'AFTER' " &
+            "AND EVENT_MANIPULATION IN ('INSERT','UPDATE') AND ACTION_STATEMENT LIKE '%IS_USED_LOCK%histomedic_descarga_portal:%'")
+            Return tablas.All(Function(tabla) {"INSERT", "UPDATE"}.All(
+                Function(operacion) triggers.Rows.Cast(Of DataRow)().Any(
+                    Function(fila) String.Equals(fila("EVENT_OBJECT_TABLE").ToString(), tabla, StringComparison.OrdinalIgnoreCase) AndAlso
+                                   String.Equals(fila("EVENT_MANIPULATION").ToString(), operacion, StringComparison.OrdinalIgnoreCase))))
+        End Using
+    End Function
+
+    Private Function ImportarRegistroPortal(ByVal tabla As String, ByVal fila As DataRow) As Boolean
+        Dim guid As String = fila("guid_system").ToString()
+        Dim idServicioLocal As Object = Nothing
+        If tabla = "tb_servicios_sistemas_detalle" Then
+            ' El servicio_id recibido pertenece al portal. Su GUID identifica la cabecera local.
+            Dim idPadrePortal As String = Convert.ToString(fila("servicio_id"), System.Globalization.CultureInfo.InvariantCulture)
+            Dim idPadre As Long
+            If Not Long.TryParse(idPadrePortal, idPadre) OrElse idPadre <= 0 Then Return False
+            Using servicioPortal As DataTable = tb_Recordset_MySQL_Central(
+                "SELECT guid_system FROM tb_servicios_sistemas WHERE id = @id", idPadre, "@id")
+                If servicioPortal.Rows.Count <> 1 Then Return False
+                Dim guidPadre As String = servicioPortal.Rows(0)("guid_system").ToString()
+                If String.IsNullOrWhiteSpace(guidPadre) Then Return False
+                Using servicioLocal As DataTable = tb_Recordset_MySQL_local(
+                    "SELECT id FROM tb_servicios_sistemas WHERE guid_system = @clave", guidPadre)
+                    If servicioLocal.Rows.Count <> 1 Then Return False
+                    idServicioLocal = servicioLocal.Rows(0)("id")
+                End Using
+            End Using
+        End If
+
+        Dim valores As New Dictionary(Of String, Object) From {{"@guid", guid}}
+        Dim asignaciones As New List(Of String)()
+        Dim acuse As New Dictionary(Of String, Object) From {{"@guid", guid}}
+        Dim version As New List(Of String)()
+        For Each columna As DataColumn In fila.Table.Columns
+            Dim nombre As String = columna.ColumnName
+            If String.Equals(nombre, "guid_system", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(nombre, "sinc_system", StringComparison.OrdinalIgnoreCase) Then Continue For
+            Dim campo As String = "`" & nombre.Replace("`", "``") & "`"
+            Dim parametro As String = "@dato" & version.Count.ToString()
+            ' Confirmar solo la versión leída. Si el portal cambió la fila, el siguiente ciclo la descarga.
+            version.Add(campo & " <=> " & parametro)
+            acuse.Add(parametro, fila(columna))
+            If String.Equals(nombre, "id", StringComparison.OrdinalIgnoreCase) OrElse
+               (tabla = "tb_servicios_sistemas" AndAlso String.Equals(nombre, "sinc", StringComparison.OrdinalIgnoreCase)) Then Continue For
+            asignaciones.Add(campo & " = " & parametro)
+            valores.Add(parametro, If(idServicioLocal IsNot Nothing AndAlso String.Equals(nombre, "servicio_id", StringComparison.OrdinalIgnoreCase),
+                                      idServicioLocal, fila(columna)))
+        Next
+        If asignaciones.Count = 0 Then Return False
+
+        If Not GuardarDescargaPortalLocal(tabla, asignaciones, valores) Then Return False
+        Return Update_Central("UPDATE " & tabla & " SET sinc_system = 0 WHERE guid_system = @guid AND sinc_system = 1 AND " &
+                              String.Join(" AND ", version), acuse)
+    End Function
+
+    Private Function GuardarDescargaPortalLocal(ByVal tabla As String, ByVal asignaciones As List(Of String),
+                                               ByVal valores As Dictionary(Of String, Object)) As Boolean
+        If cx_MySQL_local.State <> ConnectionState.Open Then Return False
+        Const nombreBloqueo As String = "CONCAT('histomedic_descarga_portal:', CONNECTION_ID())"
+        Using cmd As New MySqlConnector.MySqlCommand("SELECT GET_LOCK(" & nombreBloqueo & ", 0)", cx_MySQL_local)
+            If Not Object.Equals(Convert.ToString(cmd.ExecuteScalar()), "1") Then Return False
+            Try
+                cmd.Parameters.AddWithValue("@guid", valores("@guid"))
+                cmd.CommandText = "SELECT COUNT(*) FROM " & tabla & " WHERE guid_system = @guid"
+                Dim coincidencias As Integer = CInt(cmd.ExecuteScalar())
+                If coincidencias > 1 Then Return False
+
+                Dim campos As String = String.Join(", ", asignaciones) & ", sinc_system = 0"
+                cmd.CommandText = If(coincidencias = 0,
+                    "INSERT INTO " & tabla & " SET guid_system = @guid, " & campos,
+                    "UPDATE " & tabla & " SET " & campos & " WHERE guid_system = @guid")
+                For Each dato As KeyValuePair(Of String, Object) In valores
+                    If dato.Key <> "@guid" Then cmd.Parameters.AddWithValue(dato.Key, dato.Value)
+                Next
+                Return cmd.ExecuteNonQuery() = 1
+            Finally
+                Try
+                    cmd.Parameters.Clear()
+                    cmd.CommandText = "SELECT RELEASE_LOCK(" & nombreBloqueo & ")"
+                    If Not Object.Equals(Convert.ToString(cmd.ExecuteScalar()), "1") Then cx_MySQL_local.Close()
+                Catch
+                    cx_MySQL_local.Close()
+                    Throw
+                End Try
+            End Try
+        End Using
+    End Function
+
     Private Sub ImportarFirmasRecibido()
 
         Dim tb_servicios_sistemas As DataTable
@@ -5041,42 +5186,42 @@ no_insertar:
                                     If(usarGuid, " por GUID.", " por ID.") & " Sigue pendiente.")
             Else
 
-                '== PASO 1: Descargar imagen desde FTP remoto a carpeta temporal == ==
-                Dim NombreFotoServicio As String = tb_servicios_sistemas.Rows(i).Item("foto_servicio").ToString
-                If NombreFotoServicio <> "" Then
+                Dim NombreFotoServicio As String = servicio("foto_servicio").ToString()
+                Dim fotoTransferida As Boolean = String.IsNullOrWhiteSpace(NombreFotoServicio)
+                Dim ArchivoTemporal As String = Nothing
+                If Not fotoTransferida Then
                     Try
-                        '-- Ruta temporal local para guardar la imagen descargada --
-                        Dim RutaTemporal As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Histomedic")
-                        If Not System.IO.Directory.Exists(RutaTemporal) Then
-                            System.IO.Directory.CreateDirectory(RutaTemporal)
+                        If NombreFotoServicio <> System.IO.Path.GetFileName(NombreFotoServicio) OrElse
+                           NombreFotoServicio = "." OrElse NombreFotoServicio = ".." Then
+                            Throw New InvalidOperationException("La referencia de la foto debe ser un nombre de archivo.")
                         End If
-                        Dim ArchivoTemporal As String = System.IO.Path.Combine(RutaTemporal, NombreFotoServicio)
-                        Try
-                            System.IO.File.Delete(ArchivoTemporal)
-                        Catch ex As Exception
-                        End Try
+                        Dim nombreEnUrl As String = Uri.EscapeDataString(NombreFotoServicio)
+                        Dim RutaTemporal As String = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Histomedic")
+                        System.IO.Directory.CreateDirectory(RutaTemporal)
+                        ArchivoTemporal = System.IO.Path.Combine(RutaTemporal, Guid.NewGuid().ToString("N") & ".tmp")
 
                         '-- Datos FTP remoto (histomedic.mx) --
                         Dim FTP_Remoto_Host As String = "ftp://histomedic.mx"
                         Dim FTP_Remoto_Usuario As String = "ftp_admin@histomedic.mx"
                         Dim FTP_Remoto_Password As String = "Jhytmd2cKb*5"
-                        Dim FTP_Remoto_Ruta As String = FTP_Remoto_Host & "/portal.histomedic.mx/Assets/files/servicios/" & NombreFotoServicio
+                        Dim FTP_Remoto_Ruta As String = FTP_Remoto_Host & "/portal.histomedic.mx/Assets/files/servicios/" & nombreEnUrl
 
                         Try
                             My.Computer.Network.DownloadFile(FTP_Remoto_Ruta, ArchivoTemporal, FTP_Remoto_Usuario, FTP_Remoto_Password)
                             'LogEventos.Escribir("Imagen descargada desde FTP remoto: " & NombreFotoServicio & " para el servicio id: " & IdRegistroServicio_It.ToString())
                         Catch ex As Exception
                             LogEventos.Escribir("Error al descargar imagen desde FTP remoto para servicio id: " & IdRegistroServicio_It.ToString() & " - " & ex.Message)
+                            Continue For
                         End Try
 
 
                         '== PASO 2: Subir imagen al FTP local (127.0.0.1) en carpeta FTP_SERVICIOS == ==
-                        If System.IO.File.Exists(ArchivoTemporal) Then
+                        If System.IO.File.Exists(ArchivoTemporal) AndAlso New System.IO.FileInfo(ArchivoTemporal).Length > 0 Then
                             Try
                                 Dim FTP_Local_Host As String = IpServidor
                                 Dim FTP_Local_Usuario As String = Me.FTP_USUARIO
                                 Dim FTP_Local_Password As String = Me.FTP_PASSWORD
-                                Dim FTP_Local_Ruta As String = "ftp://" & FTP_Local_Host & "/FTP_SERVICIOS/" & NombreFotoServicio
+                                Dim FTP_Local_Ruta As String = "ftp://" & FTP_Local_Host & "/FTP_SERVICIOS/" & nombreEnUrl
 
                                 Dim ftpRequest As System.Net.FtpWebRequest = CType(System.Net.WebRequest.Create(FTP_Local_Ruta), System.Net.FtpWebRequest)
                                 ftpRequest.Method = System.Net.WebRequestMethods.Ftp.UploadFile
@@ -5093,7 +5238,7 @@ no_insertar:
                                 End Using
 
                                 Using ftpResponse As System.Net.FtpWebResponse = CType(ftpRequest.GetResponse(), System.Net.FtpWebResponse)
-                                    'LogEventos.Escribir("Imagen subida a FTP local (FTP_SERVICIOS): " & NombreFotoServicio & " - Estado: " & ftpResponse.StatusDescription.Trim())
+                                    fotoTransferida = CInt(ftpResponse.StatusCode) >= 200 AndAlso CInt(ftpResponse.StatusCode) < 300
                                 End Using
 
                             Catch ex As Exception
@@ -5103,7 +5248,20 @@ no_insertar:
 
                     Catch ex As Exception
                         LogEventos.Escribir("Error general al procesar imagen FTP del servicio id: " & IdRegistroServicio_It.ToString() & " - " & ex.Message)
+                    Finally
+                        If ArchivoTemporal IsNot Nothing Then
+                            Try
+                                System.IO.File.Delete(ArchivoTemporal)
+                            Catch ex As Exception
+                                LogEventos.Escribir("No se pudo limpiar la foto temporal del servicio del portal ID " & IdRegistroServicio_It & ".")
+                            End Try
+                        End If
                     End Try
+                End If
+
+                If Not fotoTransferida Then
+                    LogEventos.Escribir("La foto del servicio del portal ID " & IdRegistroServicio_It & " sigue pendiente. Se conserva sinc = 1.")
+                    Continue For
                 End If
 
                 Dim parametrosFirma As New Dictionary(Of String, Object) From {
@@ -5115,8 +5273,11 @@ no_insertar:
                                     "fchregistro_recibe = @fecha, firma_recibe = @firma, foto_servicio = @foto, sinc = 0" & filtroServicio, parametrosFirma) Then
                     LogEventos.Escribir("Error al sincronizar el dato en la base de datos tb_servicios_sistemas del servicio firmado con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
                 Else
-                    If Not Update_Central("UPDATE tb_servicios_sistemas SET sinc = 0" & filtroServicio,
-                                          New Dictionary(Of String, Object) From {{"@clave", claveServicio}}) Then
+                    If Not Update_Central("UPDATE tb_servicios_sistemas SET sinc = 0" & filtroServicio &
+                                          " AND sinc = 1 AND firmado = 1 AND foto_servicio <=> @foto AND fchregistro_recibe <=> @fecha",
+                                          New Dictionary(Of String, Object) From {
+                                              {"@clave", claveServicio}, {"@foto", servicio("foto_servicio")}, {"@fecha", servicio("fchregistro_recibe")}
+                                          }) Then
                         LogEventos.Escribir("Error al actualizar el valor sinc = 0 de tb_servicios_sistemas en el portal con id: " & tb_servicios_sistemas.Rows(i).Item("id").ToString & "")
                     End If
                 End If

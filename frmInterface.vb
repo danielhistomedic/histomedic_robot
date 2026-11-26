@@ -563,7 +563,9 @@ Public Class frmInterface
                     Dim esDetalleServicio As Boolean = String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase)
                     Dim altaConIdDelPortal As Boolean = esDetalleServicio OrElse String.Equals(table_name, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase)
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+                    Dim lecturaCompleta As Boolean
+                    tb_temp_insert = tb_Recordset_MySQL_localAsync("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "",
+                                                                 lecturaCompleta:=lecturaCompleta)
 
                     If altaConIdDelPortal AndAlso tb_temp_insert.Rows.Count = 1 Then
                         If Not tb_temp_insert.Columns.Contains("guid_system") OrElse String.IsNullOrWhiteSpace(tb_temp_insert.Rows(0)("guid_system").ToString()) Then
@@ -648,6 +650,7 @@ Public Class frmInterface
                     End If
 
                     If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           tb_his_replica_local.Rows(i), lecturaCompleta, AddressOf Update_localAsync,
                                            AddressOf Insert_CentralAsync, AddressOf tb_Recordset_MySQL_CentralAsync, AddressOf Update_FotoSistema_CentralAsync) Then
                         Update_CentralAsync("fchactual", "fchActual = current_timestamp", "Id", 1)
                         Update_localAsync("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -662,10 +665,13 @@ Public Class frmInterface
                         Continue For
                     End If
 
-                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsync("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    Dim lecturaCompleta As Boolean
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsync("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                                                                  lecturaCompleta:=lecturaCompleta)
                         If String.Equals(table_name, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase) AndAlso
                            datosLocales.Rows.Count = 1 AndAlso Not ResolverServicioDelDetalle(datosLocales.Rows(0)) Then Continue For
-                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_CentralAsync) Then
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, tb_his_replica_local.Rows(i), lecturaCompleta,
+                                                           AddressOf tb_Recordset_MySQL_CentralAsync, AddressOf Update_localAsync, AddressOf Update_CentralAsync) Then
                             Update_CentralAsync("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_localAsync("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
@@ -835,7 +841,9 @@ Public Class frmInterface
                 If tb_his_replica_local.Rows(i).Item("tipo_operacion").ToString = "INSERT" Then
 
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_localAsyncALM("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+                    Dim lecturaCompleta As Boolean
+                    tb_temp_insert = tb_Recordset_MySQL_localAsyncALM("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "",
+                                                                 lecturaCompleta:=lecturaCompleta)
 
                     Dim archivos As New Dictionary(Of String, Byte())()
                     If tb_temp_insert.Rows.Count = 1 Then
@@ -910,6 +918,7 @@ Public Class frmInterface
                     End If
 
                     If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           tb_his_replica_local.Rows(i), lecturaCompleta, AddressOf Update_localAsyncALM,
                                            AddressOf Insert_CentralAsyncALM, AddressOf tb_Recordset_MySQL_CentralAsyncALM, AddressOf Update_FotoSistema_CentralAsyncALM) Then
                         Update_CentralAsyncALM("fchactual", "fchActual = current_timestamp", "Id", 1)
                         Update_localAsyncALM("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -924,8 +933,11 @@ Public Class frmInterface
                         Continue For
                     End If
 
-                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsyncALM("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_CentralAsyncALM) Then
+                    Dim lecturaCompleta As Boolean
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_localAsyncALM("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                                                                  lecturaCompleta:=lecturaCompleta)
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, tb_his_replica_local.Rows(i), lecturaCompleta,
+                                                           AddressOf tb_Recordset_MySQL_CentralAsyncALM, AddressOf Update_localAsyncALM, AddressOf Update_CentralAsyncALM) Then
                             Update_CentralAsyncALM("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_localAsyncALM("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
@@ -1383,7 +1395,9 @@ Public Class frmInterface
                     tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
                     campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+                    Dim lecturaCompleta As Boolean
+                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "",
+                                                                 lecturaCompleta:=lecturaCompleta)
 
                     Dim archivos As New Dictionary(Of String, Byte())()
                     If tb_temp_insert.Rows.Count = 1 Then
@@ -1454,6 +1468,7 @@ Public Class frmInterface
                     End If
 
                     If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           tb_his_replica_local.Rows(i), lecturaCompleta, AddressOf Update_local,
                                            AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
                         Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                         Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -1471,8 +1486,11 @@ Public Class frmInterface
                         Continue For
                     End If
 
-                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                    Dim lecturaCompleta As Boolean
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                                                                  lecturaCompleta:=lecturaCompleta)
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, tb_his_replica_local.Rows(i), lecturaCompleta,
+                                                           AddressOf tb_Recordset_MySQL_Central, AddressOf Update_local, AddressOf Update_Central) Then
                             Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
@@ -1596,7 +1614,9 @@ Public Class frmInterface
                     tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
                     campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+                    Dim lecturaCompleta As Boolean
+                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "",
+                                                                 lecturaCompleta:=lecturaCompleta)
 
                     Dim archivos As New Dictionary(Of String, Byte())()
                     If tb_temp_insert.Rows.Count = 1 Then
@@ -1667,6 +1687,7 @@ Public Class frmInterface
                     End If
 
                     If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           tb_his_replica_local.Rows(i), lecturaCompleta, AddressOf Update_local,
                                            AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
                         Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                         Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -1684,8 +1705,11 @@ Public Class frmInterface
                         Continue For
                     End If
 
-                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                    Dim lecturaCompleta As Boolean
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                                                                  lecturaCompleta:=lecturaCompleta)
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, tb_his_replica_local.Rows(i), lecturaCompleta,
+                                                           AddressOf tb_Recordset_MySQL_Central, AddressOf Update_local, AddressOf Update_Central) Then
                             Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
@@ -1803,7 +1827,9 @@ Public Class frmInterface
                     tb_campo_llave = tb_Recordset_MySQL_local("SHOW COLUMNS FROM " & table_name & " WHERE Extra = 'auto_increment';")
                     campo_llave = tb_campo_llave.Rows(0).Item("Field").ToString
                     campo_llave_value_id = tb_his_replica_local.Rows(i).Item("id_tabla_afectada").ToString
-                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "")
+                    Dim lecturaCompleta As Boolean
+                    tb_temp_insert = tb_Recordset_MySQL_local("Select * from " & table_name & " where " & campo_llave & " = " & campo_llave_value_id & "",
+                                                                 lecturaCompleta:=lecturaCompleta)
 
                     Dim archivos As New Dictionary(Of String, Byte())()
                     If tb_temp_insert.Rows.Count = 1 Then
@@ -1874,6 +1900,7 @@ Public Class frmInterface
                     End If
 
                     If CompletarAltaReplica(table_name, campo_llave, campo_llave_value_id, set_value, tb_temp_insert, archivos,
+                                           tb_his_replica_local.Rows(i), lecturaCompleta, AddressOf Update_local,
                                            AddressOf Insert_Central, AddressOf tb_Recordset_MySQL_Central, AddressOf Update_FotoSistema_Central) Then
                         Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                         Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
@@ -1891,8 +1918,11 @@ Public Class frmInterface
                         Continue For
                     End If
 
-                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, AddressOf Update_Central) Then
+                    Dim lecturaCompleta As Boolean
+                    Using datosLocales As DataTable = tb_Recordset_MySQL_local("SELECT * FROM " & table_name & " WHERE " & campo_llave & " = " & idActual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                                                                  lecturaCompleta:=lecturaCompleta)
+                        If CompletarActualizacionReplica(table_name, campo_llave, idActual, datosLocales, tb_his_replica_local.Rows(i), lecturaCompleta,
+                                                           AddressOf tb_Recordset_MySQL_Central, AddressOf Update_local, AddressOf Update_Central) Then
                             Update_Central("fchactual", "fchActual = current_timestamp", "Id", 1)
                             Update_local("his_replica", "sinc = 0", "id", tb_his_replica_local.Rows(i).Item("id").ToString)
                         End If
@@ -1959,6 +1989,48 @@ Public Class frmInterface
     End Sub
 
 
+    Private Function CerrarReplicaFilaEliminada(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As String,
+                                               ByVal datosLocales As DataTable, ByVal movimiento As DataRow,
+                                               ByVal lecturaCompleta As Boolean,
+                                               ByVal consultar As Func(Of String, Object, DataTable),
+                                               ByVal actualizarLocal As Func(Of String, Dictionary(Of String, Object), Boolean)) As Boolean
+        If Not lecturaCompleta OrElse datosLocales.Rows.Count <> 0 OrElse String.IsNullOrEmpty(campoId) Then Return False
+
+        Dim idFila As Long
+        Dim idMovimiento As Long
+        If Not Long.TryParse(idLocal, idFila) OrElse Not Long.TryParse(movimiento("id").ToString(), idMovimiento) Then Return False
+
+        Dim clavePortal As Object = idFila
+        Dim campoPortal As String = campoId
+        If datosLocales.Columns.Contains("guid_system") OrElse
+           String.Equals(tabla, "tb_servicios_sistemas", StringComparison.OrdinalIgnoreCase) OrElse
+           String.Equals(tabla, "tb_servicios_sistemas_detalle", StringComparison.OrdinalIgnoreCase) Then
+            ' Un ID local no identifica una fila que pudo sincronizarse con otro ID en el portal.
+            If Not movimiento.Table.Columns.Contains("guid_system") OrElse movimiento.IsNull("guid_system") Then Return False
+            clavePortal = movimiento("guid_system")
+            Dim guidBinario As Byte() = TryCast(clavePortal, Byte())
+            If If(guidBinario Is Nothing, String.IsNullOrWhiteSpace(clavePortal.ToString()), guidBinario.Length = 0) Then Return False
+            campoPortal = "guid_system"
+        End If
+
+        Dim tablaSql As String = "`" & tabla.Replace("`", "``") & "`"
+        Dim campoIdSql As String = "`" & campoId.Replace("`", "``") & "`"
+        Dim campoPortalSql As String = "`" & campoPortal.Replace("`", "``") & "`"
+        ' COUNT(*) devuelve una fila incluso cuando la fila buscada no existe.
+        Using portal As DataTable = consultar("SELECT COUNT(*) FROM " & tablaSql & " WHERE " & campoPortalSql & " = @guid", clavePortal)
+            Dim cantidad As Long
+            If portal.Rows.Count <> 1 OrElse Not Long.TryParse(portal.Rows(0)(0).ToString(), cantidad) OrElse cantidad <> 0 Then Return False
+        End Using
+
+        ' Volver a verificar la ausencia local al cerrar el movimiento, por si la fila se recreó.
+        Dim sql As String = "UPDATE his_replica r SET r.sinc = 0 " &
+            "WHERE r.id = @idMovimiento AND r.tabla_afectada = @tabla " &
+            "AND r.id_tabla_afectada = @idFila AND r.tipo_operacion IN ('INSERT', 'UPDATE') AND r.sinc = 1 " &
+            "AND NOT EXISTS (SELECT 1 FROM " & tablaSql & " d WHERE d." & campoIdSql & " = @idFila)"
+        Return actualizarLocal(sql, New Dictionary(Of String, Object) From {
+            {"@idMovimiento", idMovimiento}, {"@tabla", tabla}, {"@idFila", idFila}})
+    End Function
+
     Private Function ResolverServicioDelDetalle(ByVal detalle As DataRow) As Boolean
         Dim idServicioLocal As Long
         If detalle.Table.Columns.Contains("servicio_id") AndAlso Long.TryParse(detalle("servicio_id").ToString(), idServicioLocal) AndAlso idServicioLocal > 0 Then
@@ -1979,11 +2051,16 @@ Public Class frmInterface
     End Function
 
     Private Function CompletarActualizacionReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As Long,
-                                                   ByVal datosLocales As DataTable,
+                                                   ByVal datosLocales As DataTable, ByVal movimiento As DataRow,
+                                                   ByVal lecturaCompleta As Boolean, ByVal consultar As Func(Of String, Object, DataTable),
+                                                   ByVal actualizarLocal As Func(Of String, Dictionary(Of String, Object), Boolean),
                                                    ByVal actualizar As Func(Of String, Dictionary(Of String, Object), Boolean)) As Boolean
         Dim referencia As String = tabla & ", ID local " & idLocal & ". El movimiento sigue pendiente."
         If datosLocales.Rows.Count <> 1 Then
-            AgregarLog(100, "Réplica: no se pudo leer una fila local para el UPDATE de " & referencia)
+            If Not CerrarReplicaFilaEliminada(tabla, campoId, idLocal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                              datosLocales, movimiento, lecturaCompleta, consultar, actualizarLocal) Then
+                AgregarLog(100, "Réplica: no se pudo leer una fila local para el UPDATE de " & referencia)
+            End If
             Return False
         End If
 
@@ -2049,13 +2126,18 @@ Public Class frmInterface
     ' Un alta solo se confirma cuando la fila y todos sus archivos están en el portal.
     Private Function CompletarAltaReplica(ByVal tabla As String, ByVal campoId As String, ByVal idLocal As String,
                                         ByVal valores As String, ByVal datosLocales As DataTable,
-                                        ByVal archivos As Dictionary(Of String, Byte()),
+                                        ByVal archivos As Dictionary(Of String, Byte()), ByVal movimiento As DataRow,
+                                        ByVal lecturaCompleta As Boolean,
+                                        ByVal actualizarLocal As Func(Of String, Dictionary(Of String, Object), Boolean),
                                         ByVal insertar As Func(Of String, String, Boolean),
                                         ByVal consultar As Func(Of String, Object, DataTable),
                                         ByVal enviarArchivo As Func(Of String, String, String, Object, Byte(), Boolean, Boolean)) As Boolean
         Dim referencia As String = tabla & ", ID local " & idLocal & ". El movimiento sigue pendiente."
         If datosLocales.Rows.Count <> 1 OrElse String.IsNullOrEmpty(campoId) OrElse String.IsNullOrWhiteSpace(valores) Then
-            AgregarLog(100, "Réplica: no se pudo leer la fila local para el alta de " & referencia)
+            If Not CerrarReplicaFilaEliminada(tabla, campoId, idLocal, datosLocales, movimiento,
+                                              lecturaCompleta, consultar, actualizarLocal) Then
+                AgregarLog(100, "Réplica: no se pudo leer la fila local para el alta de " & referencia)
+            End If
             Return False
         End If
 
@@ -3571,7 +3653,9 @@ intenta_otravz:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_local(ByVal Comando As String, Optional ByVal claveServicio As Object = Nothing) As Data.DataTable
+    Public Function tb_Recordset_MySQL_local(ByVal Comando As String, Optional ByVal claveServicio As Object = Nothing,
+                                                   Optional ByRef lecturaCompleta As Boolean = False) As Data.DataTable
+        lecturaCompleta = False
 
         Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
         Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_local)
@@ -3583,6 +3667,7 @@ intenta_otravz:
 intenta_otravz:
             If cx_MySQL_local.State = ConnectionState.Closed Then cx_MySQL_local.Open()
             da_Adaptador.Fill(dt_DataTable)
+            lecturaCompleta = True
         Catch ex As Exception
             If cx_MySQL_local.State = ConnectionState.Closed Then
                 ciclo = ciclo + 1
@@ -3752,8 +3837,10 @@ intenta_otravz:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_localAsync(ByVal Comando As String, Optional ByVal idServicio As Long? = Nothing) As Data.DataTable
+    Public Function tb_Recordset_MySQL_localAsync(ByVal Comando As String, Optional ByVal idServicio As Long? = Nothing,
+                                                  Optional ByRef lecturaCompleta As Boolean = False) As Data.DataTable
 
+        lecturaCompleta = False
         Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
         Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_localAsync)
         If idServicio.HasValue Then cmm_Comando.Parameters.AddWithValue("@idServicio", idServicio.Value)
@@ -3765,6 +3852,7 @@ intenta_otravz:
 intenta_otravz:
             If cx_MySQL_localAsync.State = ConnectionState.Closed Then cx_MySQL_localAsync.Open()
             da_Adaptador.Fill(dt_DataTable)
+            lecturaCompleta = True
 
         Catch ex As Exception
             If cx_MySQL_localAsync.State = ConnectionState.Closed Then
@@ -3841,31 +3929,37 @@ intenta_otravz:
 
     End Function
 
-    Public Function Update_localAsync(ByVal Cadena As String) As Boolean
-
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_localAsync)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_localAsync.State = ConnectionState.Closed Then cx_MySQL_localAsync.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_localAsync.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro local Async: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro local Async: " & Cadena)
-                Return False
+    Public Function Update_localAsync(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
+        Using cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_localAsync)
+            If parametros IsNot Nothing Then
+                For Each parametro As KeyValuePair(Of String, Object) In parametros
+                    cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+                Next
             End If
 
-        End Try
+            Dim ciclo As Integer = 0
+            Try
+intenta_otravz:
+                If cx_MySQL_localAsync.State = ConnectionState.Closed Then cx_MySQL_localAsync.Open()
+                Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
+            Catch ex As Exception
+                If cx_MySQL_localAsync.State = ConnectionState.Closed Then
+                    ciclo = ciclo + 1
+                    If ciclo = 3 Then
+                        AgregarLog(500, ex.Message & ", Error al actualizar registro local: " & Cadena)
+                        If parametros IsNot Nothing Then Return False
+                        Exit Try
+                    End If
+                    GoTo intenta_otravz
+                Else
+                    AgregarLog(500, ex.Message & ", Error al actualizar registro local: " & Cadena)
+                    Return False
+                End If
+            End Try
+        End Using
 
         Return True
-
     End Function
 
 
@@ -3906,7 +4000,9 @@ intenta_otravz:
 
     End Property
 
-    Public Function tb_Recordset_MySQL_localAsyncALM(ByVal Comando As String) As Data.DataTable
+    Public Function tb_Recordset_MySQL_localAsyncALM(ByVal Comando As String,
+                                                   Optional ByRef lecturaCompleta As Boolean = False) As Data.DataTable
+        lecturaCompleta = False
 
         Dim da_Adaptador As New MySqlConnector.MySqlDataAdapter
         Dim cmm_Comando As New MySqlConnector.MySqlCommand(Comando, cx_MySQL_localAsyncALM)
@@ -3917,6 +4013,7 @@ intenta_otravz:
 intenta_otravz:
             If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then cx_MySQL_localAsyncALM.Open()
             da_Adaptador.Fill(dt_DataTable)
+            lecturaCompleta = True
         Catch ex As Exception
             If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then
                 ciclo = ciclo + 1
@@ -3966,31 +4063,37 @@ intenta_otravz:
 
     End Function
 
-    Public Function Update_localAsyncALM(ByVal Cadena As String) As Boolean
-
-        Dim cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_localAsyncALM)
-        Dim ciclo As Integer = 0
-        Try
-intenta_otravz:
-            If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then cx_MySQL_localAsyncALM.Open()
-            cmm_Comando.ExecuteNonQuery()
-        Catch ex As Exception
-            If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then
-                ciclo = ciclo + 1
-                If ciclo = 3 Then
-                    AgregarLog(500, ex.Message & ", Error al actualizar registro local AsyncALM: " & Cadena)
-                    Exit Try
-                End If
-                GoTo intenta_otravz
-            Else
-                AgregarLog(500, ex.Message & ", Error al actualizar registro local AsyncALM: " & Cadena)
-                Return False
+    Public Function Update_localAsyncALM(ByVal Cadena As String, Optional ByVal parametros As Dictionary(Of String, Object) = Nothing) As Boolean
+        Using cmm_Comando As New Global.MySqlConnector.MySqlCommand(Cadena, cx_MySQL_localAsyncALM)
+            If parametros IsNot Nothing Then
+                For Each parametro As KeyValuePair(Of String, Object) In parametros
+                    cmm_Comando.Parameters.AddWithValue(parametro.Key, parametro.Value)
+                Next
             End If
 
-        End Try
+            Dim ciclo As Integer = 0
+            Try
+intenta_otravz:
+                If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then cx_MySQL_localAsyncALM.Open()
+                Dim filas As Integer = cmm_Comando.ExecuteNonQuery()
+                If parametros IsNot Nothing AndAlso filas <> 1 Then Return False
+            Catch ex As Exception
+                If cx_MySQL_localAsyncALM.State = ConnectionState.Closed Then
+                    ciclo = ciclo + 1
+                    If ciclo = 3 Then
+                        AgregarLog(500, ex.Message & ", Error al actualizar registro local AsyncALM: " & Cadena)
+                        If parametros IsNot Nothing Then Return False
+                        Exit Try
+                    End If
+                    GoTo intenta_otravz
+                Else
+                    AgregarLog(500, ex.Message & ", Error al actualizar registro local AsyncALM: " & Cadena)
+                    Return False
+                End If
+            End Try
+        End Using
 
         Return True
-
     End Function
 
 
